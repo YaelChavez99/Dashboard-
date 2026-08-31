@@ -18,10 +18,17 @@ de expandir a más módulos:
 - ✅ Pagos — historial con filtros, búsqueda, export CSV, paginación
 - ✅ Perfil de usuario — totales, historial, Cumulative Payments
 - ✅ Conciliación — Generado vs Master Pagos vs Pagado, con estados
-- 🚧 Tiendas, Zonas, Bonos, Analytics, Calidad de Datos, Reportes, Admin —
+- ✅ Admin → Sincronización — panel con último estado, botón "Sincronizar
+  datos" y bitácora (`sync_logs`)
+- ✅ Sync job Google Sheets → Supabase (`src/lib/sync/`) — lee Usuarios,
+  Configuración de Tiendas, Tarifa_Piano, Data BA, Reporte de Pagos BA-MX
+  y Aclaración de Pagos vía la API de Google Sheets (service account),
+  resuelve FKs por llave natural (phone/store_ext_id/order_id) y escribe
+  cada paso a `sync_logs`. **No probado contra datos reales todavía** —
+  no hay credenciales de Supabase ni de Google service account en esta
+  sesión. Ver "Antes del primer sync real" abajo.
+- 🚧 Tiendas, Zonas, Bonos, Analytics, Calidad de Datos, Reportes —
   pantallas "Próximamente"; siguiente fase una vez validado lo anterior.
-- 🚧 Sync job Google Sheets → Supabase — el esquema y la vista de
-  conciliación ya están listos para recibirlo (ver Roadmap).
 
 **No hay un proyecto Supabase conectado todavía.** La app corre en **modo
 demo**: cuando `NEXT_PUBLIC_SUPABASE_URL` no está configurada (o es el
@@ -81,6 +88,28 @@ Sin completar `.env.local`, la app funciona igual en modo demo (ver arriba).
 Ver `.env.example`. `SUPABASE_SERVICE_ROLE_KEY` es server-only — nunca se
 expone al cliente ni se usa fuera de `src/lib/supabase/server.ts`.
 
+### Antes del primer sync real (Google Sheets)
+
+1. Crea un service account en Google Cloud, habilita la Google Sheets
+   API, y comparte el spreadsheet auditado con el email del service
+   account como **Viewer**.
+2. Copia su email y private key a `GOOGLE_SERVICE_ACCOUNT_EMAIL` /
+   `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` en `.env.local`
+   (`GOOGLE_SHEETS_SPREADSHEET_ID` ya viene con el ID correcto).
+3. **Verifica los nombres de tab en `src/lib/sync/config.ts`** contra la
+   barra de pestañas real del spreadsheet — se infirieron de un export de
+   texto plano (ver docs/data-audit.md), no de la API, así que un nombre
+   de tab puede no coincidir exactamente. Si no coincide, el sync falla
+   con un error claro (no lee datos silenciosamente mal).
+4. El paso **"1st/2nd Payment" (la fuente de PAGADO) está deshabilitado a
+   propósito** — esa hoja tiene varias mini-tablas una junto a otra con
+   encabezados combinados, y el layout exacto de columnas no se pudo
+   confirmar desde el export de auditoría. Ver el comentario en
+   `parsePaymentRound()` (`src/lib/sync/parsers.ts`) antes de habilitarlo
+   — de lo contrario se arriesga a sumar mal dinero real.
+5. Corre el sync desde Administración → Sincronizar datos (requiere rol
+   ADMIN), o `POST /api/sync`.
+
 ## Esquema de base de datos
 
 `supabase/migrations/0001_init.sql`:
@@ -115,11 +144,14 @@ una fila real en `payments`.
 
 ## Roadmap / siguiente fase
 
-1. Conectar el proyecto Supabase real y correr las migraciones.
-2. Sync job Google Sheets → Supabase (API route + Google service account,
-   ver `.env.example`) — validar conteo de registros Sheets vs Supabase.
-3. Confirmar la fuente de `Bonos-Supply` / `Master Data BA` (no se
+1. Conectar el proyecto Supabase real, correr las migraciones, y crear el
+   service account de Google (ver "Antes del primer sync real" arriba).
+2. Correr el primer sync real y validar conteo de registros Sheets vs
+   Supabase (sección 42 del brief original — conciliación de migración).
+3. Confirmar el layout real de "1st/2nd Payment" y habilitar
+   `parsePaymentRound()` — es la única pieza del sync todavía bloqueada.
+4. Confirmar la fuente de `Bonos-Supply` / `Master Data BA` (no se
    encontraron en el archivo auditado — ver `docs/data-audit.md`) y
    construir `/bonuses`.
-4. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes, Admin (audit
-   log UI, system health, gestión de roles).
+5. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes (audit log UI,
+   system health, gestión de roles ya viven en Admin).
