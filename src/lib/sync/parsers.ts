@@ -220,18 +220,76 @@ export function parseAclaracionPagos(rows: string[][]): ParsedPaymentClaim[] {
     }));
 }
 
+export interface ParsedPaymentValidation {
+  userPhone: string;
+  task: string;
+  paymentPerTask: number;
+  storeName: string;
+  firstPayment: number;
+  secondPayment: number;
+  totalPayment: number;
+  matched: boolean;
+  adjustment: number;
+}
+
 /**
- * "1st Payment" / "2nd Payment" (the PAGADO source) were observed to lay
- * out more than one mini-table side by side in the same row range with
- * merged headers (see docs/data-audit.md) — the exact A1 column boundaries
- * could not be confirmed from the flattened text export used for the
- * audit. Parsing it with a guessed layout risks silently mis-summing real
- * money, so this stays a hard stop until someone opens the sheet and
- * confirms the real header row here.
+ * "1st Payment" / "2nd Payment" / "Payment Validation" live as three
+ * mini-tables side by side in the same tab, with merged section headers
+ * above them (see docs/data-audit.md) — so unlike every other parser in
+ * this file, the column position can't be hardcoded from a fixed header
+ * row index.
+ *
+ * "Payment Validation" is the authoritative one: it already reconciles
+ * 1st + 2nd = Total per user with a Match flag, which is exactly PAGADO.
+ * Rather than guess its column offset, this scans the fetched grid for
+ * its header row (USER, Task, Payment per task, Store, 1st Payment,
+ * 2nd Payment, Total Payment, Match, Adjustment appearing consecutively)
+ * and reads from there — robust to the two other mini-tables shifting
+ * around it, but still fails loudly if that header sequence isn't found
+ * anywhere in the fetched range.
  */
-export function parsePaymentRound(): never {
-  throw new Error(
-    "[sync] 1st/2nd Payment column layout not yet confirmed against the live sheet — " +
-      "see the comment on parsePaymentRound() in src/lib/sync/parsers.ts before enabling this sync step."
-  );
+export function parsePaymentValidation(rows: string[][]): ParsedPaymentValidation[] {
+  const EXPECTED = ["USER", "Task", "Store", "Match"] as const;
+
+  let headerRow = -1;
+  let startCol = -1;
+
+  outer: for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    for (let c = 0; c < row.length; c++) {
+      if (String(row[c] ?? "").trim() !== "USER") continue;
+      const task = String(row[c + 1] ?? "").trim();
+      const store = String(row[c + 3] ?? "").trim();
+      const match = String(row[c + 7] ?? "").trim();
+      if (task === EXPECTED[1] && store === EXPECTED[2] && match === EXPECTED[3]) {
+        headerRow = r;
+        startCol = c;
+        break outer;
+      }
+    }
+  }
+
+  if (headerRow === -1) {
+    throw new Error(
+      '[sync] Could not find the "Payment Validation" header row (USER, Task, ..., Store, ..., Match) ' +
+        "in the fetched range — the sheet layout changed, or RANGES.paymentValidation in " +
+        "src/lib/sync/config.ts needs a wider range. See parsePaymentValidation() in parsers.ts."
+    );
+  }
+
+  const c = startCol;
+  return rows
+    .slice(headerRow + 1)
+    .filter((r) => r[c])
+    .map((r) => ({
+      userPhone: String(r[c] ?? "").trim(),
+      task: String(r[c + 1] ?? "").trim(),
+      paymentPerTask: toNumber(r[c + 2]),
+      storeName: String(r[c + 3] ?? "").trim(),
+      firstPayment: toNumber(r[c + 4]),
+      secondPayment: toNumber(r[c + 5]),
+      totalPayment: toNumber(r[c + 6]),
+      matched: String(r[c + 7] ?? "").trim().toUpperCase() === "TRUE",
+      adjustment: toNumber(r[c + 8]),
+    }));
 }

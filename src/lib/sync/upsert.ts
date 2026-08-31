@@ -6,6 +6,7 @@ import type {
   ParsedOrder,
   ParsedFinanceSubmission,
   ParsedPaymentClaim,
+  ParsedPaymentValidation,
 } from "./parsers";
 
 export interface StepResult {
@@ -231,4 +232,48 @@ export async function upsertPaymentClaims(
   const { error } = await supabase.from("payment_claims").insert(payload);
 
   return { read: rows.length, inserted: payload.length, updated: 0, errors: error ? 1 : 0, errorDetail: error };
+}
+
+export async function upsertPayments(
+  rows: ParsedPaymentValidation[],
+  ctx: { userIdByPhone: Map<string, string>; storeIdByNameUpper: Map<string, string> }
+): Promise<StepResult> {
+  const supabase = createServiceRoleClient();
+  const deduped = dedupeByKey(rows, (r) => `${r.userPhone}|${r.task}`);
+
+  // Payment Validation already reconciles 1st + 2nd = Total per Match — so
+  // one validated record becomes up to two payments rows, one per round,
+  // splitting only the amounts that are actually non-zero. The whole
+  // record's adjustment is attached to round 2 (adjustments are applied
+  // at the reconciliation/2nd-payment stage in the source sheet).
+  const payload: Record<string, unknown>[] = [];
+  for (const r of deduped) {
+    const userId = ctx.userIdByPhone.get(r.userPhone) ?? null;
+    const storeId = ctx.storeIdByNameUpper.get(r.storeName.toUpperCase()) ?? null;
+    const base = {
+      user_id: userId,
+      store_id: storeId,
+      period_label: null,
+      task_ref: r.task,
+      matched: r.matched,
+      raw_row: r,
+    };
+    if (r.firstPayment !== 0) {
+      payload.push({ ...base, payment_round: 1, amount: r.firstPayment, adjustment: 0 });
+    }
+    if (r.secondPayment !== 0) {
+      payload.push({ ...base, payment_round: 2, amount: r.secondPayment, adjustment: r.adjustment });
+    }
+  }
+
+  const withUser = payload.filter((p) => p.user_id != null);
+  const { error } = withUser.length ? await supabase.from("payments").insert(withUser) : { error: null };
+
+  return {
+    read: rows.length,
+    inserted: withUser.length,
+    updated: 0,
+    errors: error ? 1 : 0,
+    errorDetail: error,
+  };
 }

@@ -8,6 +8,7 @@ import {
   parseDataBA,
   parseMasterPagos,
   parseAclaracionPagos,
+  parsePaymentValidation,
 } from "./parsers";
 import {
   upsertUsers,
@@ -17,6 +18,7 @@ import {
   upsertOrders,
   upsertFinanceSubmissions,
   upsertPaymentClaims,
+  upsertPayments,
   type StepResult,
 } from "./upsert";
 
@@ -164,14 +166,22 @@ export async function runSync(): Promise<SyncSummary> {
     )
   );
 
-  steps.push({
-    sheet: "1st/2nd Payment (PAGADO)",
-    status: "SKIPPED",
-    read: 0,
-    inserted: 0,
-    errors: 0,
-    errorDetail: "Column layout not yet confirmed — see parsePaymentRound() in parsers.ts.",
-  });
+  const storeIdByNameUpper = new Map(
+    parsedStores.map((s) => [s.name.toUpperCase(), storesUpsert.idByExtId.get(s.storeExtId)]).filter(
+      (entry): entry is [string, string] => entry[1] != null
+    )
+  );
+
+  const paymentValidationRows = await getSheetValues(RANGES.paymentValidation);
+  const parsedPayments = parsePaymentValidation(paymentValidationRows);
+  steps.push(
+    await runStep("Payment Validation (PAGADO)", () =>
+      upsertPayments(parsedPayments, {
+        userIdByPhone: usersUpsert.idByPhone,
+        storeIdByNameUpper,
+      })
+    )
+  );
 
   return {
     startedAt,

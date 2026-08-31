@@ -21,12 +21,13 @@ de expandir a más módulos:
 - ✅ Admin → Sincronización — panel con último estado, botón "Sincronizar
   datos" y bitácora (`sync_logs`)
 - ✅ Sync job Google Sheets → Supabase (`src/lib/sync/`) — lee Usuarios,
-  Configuración de Tiendas, Tarifa_Piano, Data BA, Reporte de Pagos BA-MX
-  y Aclaración de Pagos vía la API de Google Sheets (service account),
-  resuelve FKs por llave natural (phone/store_ext_id/order_id) y escribe
-  cada paso a `sync_logs`. **No probado contra datos reales todavía** —
-  no hay credenciales de Supabase ni de Google service account en esta
-  sesión. Ver "Antes del primer sync real" abajo.
+  Configuración de Tiendas, Tarifa_Piano, Data BA, Reporte de Pagos BA-MX,
+  Aclaración de Pagos y Payment Validation (PAGADO) vía la API de Google
+  Sheets (service account), resuelve FKs por llave natural
+  (phone/store_ext_id/order_id) y escribe cada paso a `sync_logs`.
+  **No probado contra datos reales todavía** — no hay credenciales de
+  Supabase ni de Google service account en esta sesión. Ver "Antes del
+  primer sync real" abajo.
 - 🚧 Tiendas, Zonas, Bonos, Analytics, Calidad de Datos, Reportes —
   pantallas "Próximamente"; siguiente fase una vez validado lo anterior.
 
@@ -101,12 +102,17 @@ expone al cliente ni se usa fuera de `src/lib/supabase/server.ts`.
    texto plano (ver docs/data-audit.md), no de la API, así que un nombre
    de tab puede no coincidir exactamente. Si no coincide, el sync falla
    con un error claro (no lee datos silenciosamente mal).
-4. El paso **"1st/2nd Payment" (la fuente de PAGADO) está deshabilitado a
-   propósito** — esa hoja tiene varias mini-tablas una junto a otra con
-   encabezados combinados, y el layout exacto de columnas no se pudo
-   confirmar desde el export de auditoría. Ver el comentario en
-   `parsePaymentRound()` (`src/lib/sync/parsers.ts`) antes de habilitarlo
-   — de lo contrario se arriesga a sumar mal dinero real.
+4. La hoja **"Payment Validation"** (fuente de PAGADO) tiene tres
+   mini-tablas ("1st Payment", "2nd Payment", "Payment Validation") una
+   junto a otra con encabezados combinados — `TAB.paymentValidation` en
+   `src/lib/sync/config.ts` es la conjetura menos confirmada de esta
+   config (nombre de tab real sin verificar). Para compensarlo,
+   `parsePaymentValidation()` no asume una columna fija: escanea el rango
+   completo buscando la fila de encabezado real (`USER, Task, ..., Store,
+   ..., Match`) y lee desde ahí — así que un corrimiento de columnas no
+   rompe nada, pero un nombre de tab equivocado sí falla con un 404 claro
+   de la API. Confírmalo contra la barra de pestañas antes del primer
+   sync real.
 5. Corre el sync desde Administración → Sincronizar datos (requiere rol
    ADMIN), o `POST /api/sync`.
 
@@ -146,12 +152,11 @@ una fila real en `payments`.
 
 1. Conectar el proyecto Supabase real, correr las migraciones, y crear el
    service account de Google (ver "Antes del primer sync real" arriba).
-2. Correr el primer sync real y validar conteo de registros Sheets vs
-   Supabase (sección 42 del brief original — conciliación de migración).
-3. Confirmar el layout real de "1st/2nd Payment" y habilitar
-   `parsePaymentRound()` — es la única pieza del sync todavía bloqueada.
-4. Confirmar la fuente de `Bonos-Supply` / `Master Data BA` (no se
+2. Correr el primer sync real, confirmar `TAB.paymentValidation` contra
+   la barra de pestañas, y validar conteo de registros Sheets vs Supabase
+   por hoja (sección 42 del brief original — conciliación de migración).
+3. Confirmar la fuente de `Bonos-Supply` / `Master Data BA` (no se
    encontraron en el archivo auditado — ver `docs/data-audit.md`) y
    construir `/bonuses`.
-5. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes (audit log UI,
+4. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes (audit log UI,
    system health, gestión de roles ya viven en Admin).
