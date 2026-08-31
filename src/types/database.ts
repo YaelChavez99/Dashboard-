@@ -117,6 +117,21 @@ export interface ReconciliationRow {
   status: ReconciliationStatus;
 }
 
+export interface Bonus {
+  id: string;
+  bonus_date: string;
+  week_service: string | null;
+  brand: string;
+  area: string | null;
+  owner: string | null;
+  typo: string;
+  store_id: string | null;
+  user_id: string | null;
+  description: string | null;
+  amount: number;
+  payment_checked: boolean;
+}
+
 export interface SyncLog {
   id: string;
   source_sheet: string;

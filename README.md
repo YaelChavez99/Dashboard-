@@ -20,16 +20,18 @@ de expandir a más módulos:
 - ✅ Conciliación — Generado vs Master Pagos vs Pagado, con estados
 - ✅ Admin → Sincronización — panel con último estado, botón "Sincronizar
   datos" y bitácora (`sync_logs`)
+- ✅ Bonos — hoja Bonos-Supply (confirmada por el usuario en
+  `gid=2132023001` del mismo spreadsheet), tabla + KPIs
 - ✅ Sync job Google Sheets → Supabase (`src/lib/sync/`) — lee Usuarios,
   Configuración de Tiendas, Tarifa_Piano, Data BA, Reporte de Pagos BA-MX,
-  Aclaración de Pagos y Payment Validation (PAGADO) vía la API de Google
-  Sheets (service account), resuelve FKs por llave natural
+  Aclaración de Pagos, Payment Validation (PAGADO) y Bonos-Supply vía la
+  API de Google Sheets (service account), resuelve FKs por llave natural
   (phone/store_ext_id/order_id) y escribe cada paso a `sync_logs`.
   **No probado contra datos reales todavía** — no hay credenciales de
   Supabase ni de Google service account en esta sesión. Ver "Antes del
   primer sync real" abajo.
-- 🚧 Tiendas, Zonas, Bonos, Analytics, Calidad de Datos, Reportes —
-  pantallas "Próximamente"; siguiente fase una vez validado lo anterior.
+- 🚧 Tiendas, Zonas, Analytics, Calidad de Datos, Reportes — pantallas
+  "Próximamente"; siguiente fase una vez validado lo anterior.
 
 **No hay un proyecto Supabase conectado todavía.** La app corre en **modo
 demo**: cuando `NEXT_PUBLIC_SUPABASE_URL` no está configurada (o es el
@@ -152,11 +154,11 @@ una fila real en `payments`.
 
 1. Conectar el proyecto Supabase real, correr las migraciones, y crear el
    service account de Google (ver "Antes del primer sync real" arriba).
-2. Correr el primer sync real, confirmar `TAB.paymentValidation` contra
-   la barra de pestañas, y validar conteo de registros Sheets vs Supabase
-   por hoja (sección 42 del brief original — conciliación de migración).
-3. Confirmar la fuente de `Bonos-Supply` / `Master Data BA` (no se
-   encontraron en el archivo auditado — ver `docs/data-audit.md`) y
-   construir `/bonuses`.
+2. Correr el primer sync real, confirmar `TAB.paymentValidation` y
+   `TAB.bonosSupply` contra la barra de pestañas, y validar conteo de
+   registros Sheets vs Supabase por hoja (sección 42 del brief original —
+   conciliación de migración).
+3. Confirmar la fuente de `Master Data BA` (no se encontró en el archivo
+   auditado — ver `docs/data-audit.md`).
 4. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes (audit log UI,
    system health, gestión de roles ya viven en Admin).

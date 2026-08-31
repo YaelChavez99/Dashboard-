@@ -26,6 +26,11 @@ export const TAB = {
   // fails loudly rather than silently, but a wrong TAB NAME still 404s
   // at the Sheets API — confirm this against the tab bar first.
   paymentValidation: "Payment Validation",
+  // Confirmed by the user at gid=2132023001 of this same spreadsheet — a
+  // clean single-header table (unlike Payment Validation above), but its
+  // literal tab name wasn't directly observable either; "Bonos-Supply" is
+  // how the user identified it.
+  bonosSupply: "Bonos-Supply",
 } as const;
 
 // Row range is generous (2000-20000) since exact row counts vary per sync
@@ -40,4 +45,5 @@ export const RANGES = {
   // Wide on purpose — covers all three mini-tables regardless of which
   // column the "Payment Validation" one actually starts at.
   paymentValidation: `${TAB.paymentValidation}!A1:AG5000`,
+  bonosSupply: `${TAB.bonosSupply}!A1:X20000`,
 } as const;

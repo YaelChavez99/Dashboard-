@@ -80,13 +80,43 @@ Tabla de tarifas — no transacciones. Se usa para calcular el monto
 ### Performance por día/general
 Pivote de OnTime% por región/fecha. No es tabla base.
 
+### Bonos-Supply
+Confirmada por el usuario en `gid=2132023001` del mismo spreadsheet
+(no estaba en el primer dump por tamaño — apareció en una segunda lectura
+completa). Tabla plana de una sola fila de encabezado, sin las mini-tablas
+combinadas que sí tienen Payment Validation:
+```
+DATE, WEEK SERVICE, BRAND, AREA, OWNER, TYPO, STORE ID, (vacía), Store,
+USER, DESCRIPTION, AMOUNT, Payment check, OT, Validación, Comentario
+```
+seguida a la derecha por una mini-tabla de referencia sin relación directa
+(`Store ID | Det | Tienda`, un lookup de apoyo).
+
+- `BRAND` trae valores como `Bodega Aurrera` — en las filas muestreadas
+  todas eran `Bodega Aurrera`, consistente con que este spreadsheet es
+  BA-MX-only (a diferencia de otro archivo distinto, "Zubale MX - Walmart
+  | Ops + Supply + Growth Bonus Master Report V2", que si acumula Walmart
+  + Sams + Bodega Aurrera — **no es la fuente correcta**, se descartó).
+- `TYPO` es el tipo/categoría de bono (ej. "Supervisor Payment - Expediter").
+- `STORE ID` usa la misma llave que Data BA / Config Tiendas / Master Pagos.
+- `USER` es el mismo identificador tipo-teléfono que en el resto del archivo.
+- `Store` (columna 8) muestra `#N/A` en las filas muestreadas — es una
+  fórmula rota en el Sheet, no usar; resolver el nombre de tienda vía
+  `STORE ID` contra `stores` en su lugar.
+- `Payment check` es TRUE/FALSE — es la señal más cercana a "confirmado",
+  pero no hay evidencia de un estado explícito tipo "Aprobado/Pagado"
+  como en Master Pagos, así que se modela como un booleano de
+  verificación, no como pago confirmado (mismo principio que el resto:
+  no asumir que "revisado" = "pagado").
+- Nombre real del tab sin confirmar al 100% — se usa `"Bonos-Supply"`
+  como mejor conjetura (así lo identificó el usuario). Ver
+  `src/lib/sync/config.ts`.
+
 ## No encontrado en este archivo
 
-`Bonos-Supply` y `Master Data BA` (mencionadas en la descripción original
-del proyecto) **no aparecen** en este spreadsheet. Pendiente de confirmar
-si viven en otro archivo de Google Sheets o si esos nombres cambiaron.
-La sección "Bonos" del producto queda marcada como *Próximamente* hasta
-tener esa fuente.
+`Master Data BA` (mencionada en la descripción original del proyecto)
+**no aparece** en este spreadsheet. Pendiente de confirmar si vive en
+otro archivo de Google Sheets o si el nombre cambió.
 
 ## Decisiones de modelado que se derivan de esta auditoría
 

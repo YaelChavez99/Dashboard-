@@ -131,6 +131,46 @@ export const TRANSACTIONS: MockTxn[] = Array.from({ length: 1400 }).map((_, i) =
   };
 });
 
+const BONUS_TYPOS = [
+  "Bonus - Training",
+  "Bonus - BUA Bonus Capacitación",
+  "Supervisor Payment - Expediter",
+  "Weekends Bonus (F/S/S)",
+  "Reimbursement - Parking",
+  "Motorcycle Bonus",
+  "Movement Bonus (Clustering)",
+];
+const BONUS_AREAS = ["Ops", "Supply", "Growth"];
+
+export interface MockBonus {
+  id: string;
+  date: Date;
+  user: (typeof USERS)[number];
+  store: (typeof STORES)[number];
+  area: string;
+  typo: string;
+  amount: number;
+  paymentChecked: boolean;
+}
+
+export const BONUSES: MockBonus[] = Array.from({ length: 180 }).map((_, i) => {
+  const user = pick(USERS);
+  const daysAgo = randInt(0, DAYS);
+  const date = new Date(today);
+  date.setDate(date.getDate() - daysAgo);
+
+  return {
+    id: `bonus-${i + 1}`,
+    date,
+    user,
+    store: user.store,
+    area: pick(BONUS_AREAS),
+    typo: pick(BONUS_TYPOS),
+    amount: randAmount(100, 1500),
+    paymentChecked: rand() > 0.2,
+  };
+});
+
 export function totalsForPeriod(days: number) {
   const cutoff = new Date(today);
   cutoff.setDate(cutoff.getDate() - days);

@@ -7,6 +7,7 @@ import type {
   ParsedFinanceSubmission,
   ParsedPaymentClaim,
   ParsedPaymentValidation,
+  ParsedBonus,
 } from "./parsers";
 
 export interface StepResult {
@@ -276,4 +277,36 @@ export async function upsertPayments(
     errors: error ? 1 : 0,
     errorDetail: error,
   };
+}
+
+export async function upsertBonuses(
+  rows: ParsedBonus[],
+  ctx: { storeIdByExtId: Map<string, string>; userIdByPhone: Map<string, string> }
+): Promise<StepResult> {
+  const supabase = createServiceRoleClient();
+  const deduped = dedupeByKey(rows, (r) => `${r.userPhone}|${r.bonusDate}|${r.typo}|${r.description}`);
+
+  const payload = deduped.map((r) => ({
+    bonus_date: r.bonusDate,
+    week_service: r.weekService || null,
+    brand: r.brand,
+    area: r.area || null,
+    owner: r.owner || null,
+    typo: r.typo,
+    store_id: ctx.storeIdByExtId.get(r.storeExtId) ?? null,
+    user_id: ctx.userIdByPhone.get(r.userPhone) ?? null,
+    description: r.description || null,
+    amount: r.amount,
+    payment_checked: r.paymentChecked,
+    ot: r.ot || null,
+    validation: r.validation || null,
+    comments: r.comments || null,
+    raw_row: r,
+  }));
+
+  // Same as finance_submissions/payment_claims — no stable per-row id in
+  // the sheet, so this re-inserts on every sync rather than upserting.
+  const { error } = payload.length ? await supabase.from("bonuses").insert(payload) : { error: null };
+
+  return { read: rows.length, inserted: payload.length, updated: 0, errors: error ? 1 : 0, errorDetail: error };
 }

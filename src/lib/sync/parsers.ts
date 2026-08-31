@@ -28,6 +28,10 @@ function toBool01(value: unknown): boolean {
   return String(value).trim() === "1";
 }
 
+function toBoolTrueFalse(value: unknown): boolean {
+  return String(value).trim().toUpperCase() === "TRUE";
+}
+
 export interface ParsedUser {
   phone: string;
   fullName: string;
@@ -291,5 +295,56 @@ export function parsePaymentValidation(rows: string[][]): ParsedPaymentValidatio
       totalPayment: toNumber(r[c + 6]),
       matched: String(r[c + 7] ?? "").trim().toUpperCase() === "TRUE",
       adjustment: toNumber(r[c + 8]),
+    }));
+}
+
+export interface ParsedBonus {
+  bonusDate: string;
+  weekService: string;
+  brand: string;
+  area: string;
+  owner: string;
+  typo: string;
+  storeExtId: string;
+  userPhone: string;
+  description: string;
+  amount: number;
+  paymentChecked: boolean;
+  ot: string;
+  validation: string;
+  comments: string;
+}
+
+export function parseBonosSupply(rows: string[][]): ParsedBonus[] {
+  assertHeader(
+    rows,
+    [
+      "DATE", "WEEK SERVICE", "BRAND", "AREA", "OWNER", "TYPO", "STORE ID", "",
+      "Store", "USER", "DESCRIPTION", "AMOUNT", "Payment check", "OT", "Validación",
+      "Comentario",
+    ],
+    "Bonos-Supply"
+  );
+  return rows
+    .slice(1)
+    .filter((r) => r[0] && r[9])
+    // Scoped to Bodega Aurrera — this sheet is BA-MX-only in practice, but
+    // filtering explicitly guards against a stray row from another brand.
+    .filter((r) => String(r[2] ?? "").trim() === "Bodega Aurrera")
+    .map((r) => ({
+      bonusDate: String(r[0]).trim(),
+      weekService: String(r[1] ?? "").trim(),
+      brand: String(r[2] ?? "").trim(),
+      area: String(r[3] ?? "").trim(),
+      owner: String(r[4] ?? "").trim(),
+      typo: String(r[5] ?? "").trim(),
+      storeExtId: String(r[6] ?? "").trim(),
+      userPhone: String(r[9]).trim(),
+      description: String(r[10] ?? "").trim(),
+      amount: toNumber(r[11]),
+      paymentChecked: toBoolTrueFalse(r[12]),
+      ot: String(r[13] ?? "").trim(),
+      validation: String(r[14] ?? "").trim(),
+      comments: String(r[15] ?? "").trim(),
     }));
 }

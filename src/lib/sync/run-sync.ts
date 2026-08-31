@@ -9,6 +9,7 @@ import {
   parseMasterPagos,
   parseAclaracionPagos,
   parsePaymentValidation,
+  parseBonosSupply,
 } from "./parsers";
 import {
   upsertUsers,
@@ -19,6 +20,7 @@ import {
   upsertFinanceSubmissions,
   upsertPaymentClaims,
   upsertPayments,
+  upsertBonuses,
   type StepResult,
 } from "./upsert";
 
@@ -179,6 +181,17 @@ export async function runSync(): Promise<SyncSummary> {
       upsertPayments(parsedPayments, {
         userIdByPhone: usersUpsert.idByPhone,
         storeIdByNameUpper,
+      })
+    )
+  );
+
+  const bonosRows = await getSheetValues(RANGES.bonosSupply);
+  const parsedBonuses = parseBonosSupply(bonosRows);
+  steps.push(
+    await runStep("Bonos-Supply", () =>
+      upsertBonuses(parsedBonuses, {
+        storeIdByExtId: storesUpsert.idByExtId,
+        userIdByPhone: usersUpsert.idByPhone,
       })
     )
   );
