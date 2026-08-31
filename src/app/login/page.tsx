@@ -1,15 +1,14 @@
 import { Suspense } from "react";
 
 import { LoginForm } from "./login-form";
+import { BrandMark } from "@/components/layout/brand-mark";
 
 export default function LoginPage() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-[#0f172a] px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex items-center justify-center gap-2.5">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-            F
-          </div>
+          <BrandMark className="size-9 text-lg" />
           <div>
             <p className="text-sm font-semibold text-white leading-tight">
               Finance & Operations

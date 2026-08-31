@@ -1,5 +1,6 @@
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { Topbar } from "@/components/layout/topbar";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { requireCurrentUser } from "@/lib/data/current-user";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -10,9 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen w-full">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
         <div className="flex h-14 items-center gap-2.5 px-4">
-          <div className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-            F
-          </div>
+          <BrandMark className="size-7 rounded-md text-xs" />
           <span className="text-sm font-semibold text-sidebar-foreground">
             Finance & Ops Control
           </span>

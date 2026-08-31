@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { SidebarNav } from "./sidebar-nav";
+import { BrandMark } from "./brand-mark";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import type { UserRole } from "@/types/database";
 import { signOutAction } from "@/app/(app)/actions";
@@ -50,9 +51,7 @@ export function Topbar({
         <SheetContent side="left" className="p-0">
           <SheetTitle className="sr-only">Navegación</SheetTitle>
           <div className="flex h-14 items-center gap-2.5 px-4">
-            <div className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-              F
-            </div>
+            <BrandMark className="size-7 rounded-md text-xs" />
             <span className="text-sm font-semibold text-sidebar-foreground">
               Finance & Ops
             </span>
