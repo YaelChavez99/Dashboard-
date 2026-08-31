@@ -27,10 +27,14 @@ de expandir a más módulos:
   Aclaración de Pagos, Payment Validation (PAGADO) y Bonos-Supply vía la
   API de Google Sheets (service account), resuelve FKs por llave natural
   (phone/store_ext_id/order_id) y escribe cada paso a `sync_logs`.
-  **No probado contra datos reales todavía** — no hay credenciales de
-  Supabase ni de Google service account en esta sesión. Ver "Antes del
-  primer sync real" abajo.
-- 🚧 Tiendas, Zonas, Analytics, Calidad de Datos, Reportes — pantallas
+  El proyecto Supabase de producción ya está conectado (Vercel), pero el
+  service account de Google todavía no — ver "Antes del primer sync real"
+  abajo.
+- ✅ Analytics — dashboard ejecutivo operativo: tendencias de volumen de
+  órdenes y on-time % (día/semana/mes), desglose por estado operativo,
+  zona y estado geográfico, ranking de tiendas y usuarios por
+  performance. Basado en `orders` (Data BA).
+- 🚧 Tiendas, Zonas, Calidad de Datos, Reportes — pantallas
   "Próximamente"; siguiente fase una vez validado lo anterior.
 
 **No hay un proyecto Supabase conectado todavía.** La app corre en **modo
