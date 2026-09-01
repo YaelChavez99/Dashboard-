@@ -122,6 +122,35 @@ expone al cliente ni se usa fuera de `src/lib/supabase/server.ts`.
 5. Corre el sync desde Administración → Sincronizar datos (requiere rol
    ADMIN), o `POST /api/sync`.
 
+### Fuente operativa actual: BigQuery (`ext_bodega_aurrera`)
+
+El foco actual del proyecto es 100% operativo (órdenes, tiendas, usuarios —
+sin el lado financiero). En vez de leer los tabs de Sheets uno por uno, la
+fuente de datos operativa es la tabla `ext_bodega_aurrera` en BigQuery
+(`zb-data-bu-mexico-dev`), que ya es alimentada por el pipeline propio de
+Sheets → BigQuery de la empresa. `src/lib/sync/run-operational-sync.ts`
+deriva usuarios y tiendas de esas mismas filas y hace upsert de órdenes —
+deliberadamente no toca `finance_submissions` / `payment_claims` /
+`payments` / `bonuses`.
+
+Para correr este sync automatizado hace falta un service account de Google
+Cloud con acceso de lectura a BigQuery
+(`GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` /
+`BIGQUERY_PROJECT_ID` / `BIGQUERY_DATASET` en `.env.local`) — actualmente
+bloqueado por permisos IAM del proyecto compartido.
+
+#### Workaround mientras se habilita el acceso: carga manual de CSV
+
+Administración → "Carga manual" acepta un CSV exportado directamente de
+`ext_bodega_aurrera` desde BigQuery Studio (mismas columnas: `ORDER_ID`,
+`STATUS`, `STORE_NUMBER`, `STORE_NAME`, `STATE`, `DELIVERY_DATE`, `SLOT`,
+`ON_TIME`, `DISTANCE_MAN_HAV`, `SHOPPER_FULL_NAME`, `SHOPPER_EMAIL`,
+`NO_LINES_REQUESTED`, `STORE_ID`, `PEDIDOS_LATE`, `ZONA_CLASIFICACION`,
+`FECHA_LIMPIA`). Reutiliza los mismos parsers y upserts que el sync
+automatizado (`src/app/api/sync/upload-csv/route.ts`), así que produce el
+mismo resultado — sólo requiere que un ADMIN exporte y suba el archivo a
+mano en lugar de que el server lo consulte directo.
+
 ## Esquema de base de datos
 
 `supabase/migrations/0001_init.sql`:
