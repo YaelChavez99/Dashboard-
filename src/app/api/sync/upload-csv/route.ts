@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Papa from "papaparse";
 
 import { getCurrentUser } from "@/lib/data/current-user";
 import { isDemoMode } from "@/lib/data/demo-mode";
@@ -22,6 +21,13 @@ async function logStep(sourceSheet: string, startedAt: string, result: { read: n
   });
 }
 
+/**
+ * Receives one batch of already-parsed CSV rows (parsing happens client-side
+ * so a large export never has to fit in a single request body — Vercel caps
+ * request bodies at ~4.5MB, well under what a full ext_bodega_aurrera export
+ * needs). Each batch is upserted independently; safe to call repeatedly
+ * since every write here is an upsert keyed on a stable id.
+ */
 export async function POST(request: NextRequest) {
   if (isDemoMode()) {
     return NextResponse.json(
@@ -35,29 +41,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Solo un administrador puede cargar datos." }, { status: 403 });
   }
 
-  const formData = await request.formData();
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "No se recibió ningún archivo." }, { status: 400 });
+  let body: { fileName?: string; rows?: Record<string, unknown>[] };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Solicitud inválida: se esperaba JSON." }, { status: 400 });
   }
 
-  const text = await file.text();
-  const parsed = Papa.parse<Record<string, unknown>>(text, {
-    header: true,
-    skipEmptyLines: true,
-    dynamicTyping: false,
-  });
-
-  if (parsed.errors.length > 0) {
-    return NextResponse.json(
-      { error: `Error leyendo el CSV: ${parsed.errors[0].message} (fila ${parsed.errors[0].row})` },
-      { status: 400 }
-    );
-  }
-
-  const rawRows = parsed.data;
-  if (rawRows.length === 0) {
-    return NextResponse.json({ error: "El archivo no tiene filas de datos." }, { status: 400 });
+  const rawRows = body.rows;
+  const fileName = body.fileName || "CSV";
+  if (!Array.isArray(rawRows) || rawRows.length === 0) {
+    return NextResponse.json({ error: "No se recibieron filas en el lote." }, { status: 400 });
   }
   if (rawRows[0].ORDER_ID === undefined) {
     return NextResponse.json(
@@ -73,7 +67,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const sourceLabel = `CSV: ${file.name}`;
+    const sourceLabel = `CSV: ${fileName}`;
 
     const derivedUsers = deriveUsersFromBigQuery(rawRows);
     const usersStartedAt = new Date().toISOString();
@@ -99,7 +93,6 @@ export async function POST(request: NextRequest) {
     await logStep(sourceLabel, ordersStartedAt, ordersResult);
 
     return NextResponse.json({
-      fileName: file.name,
       rowsRead: rawRows.length,
       usersUpserted: usersUpsert.result.inserted,
       storesUpserted: storesUpsert.result.inserted,
