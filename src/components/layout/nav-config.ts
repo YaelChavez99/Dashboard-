@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   FileText,
   Settings,
+  TrendingUp,
+  Library,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +36,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Finanzas",
     icon: Wallet,
     children: [
+      { label: "Revenue y Margen", href: "/finance", icon: TrendingUp },
       { label: "Pagos", href: "/payments", icon: History },
       { label: "Conciliación", href: "/reconciliation", icon: GitCompareArrows },
       { label: "Pendientes", href: "/payments?status=PENDIENTE", icon: Clock },
@@ -50,6 +53,7 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   { label: "Analytics", icon: LineChart, href: "/analytics" },
+  { label: "Biblioteca", icon: Library, href: "/library" },
   { label: "Calidad de Datos", icon: ShieldCheck, href: "/data-quality" },
   { label: "Reportes", icon: FileText, href: "/reports" },
   { label: "Administración", icon: Settings, href: "/admin" },

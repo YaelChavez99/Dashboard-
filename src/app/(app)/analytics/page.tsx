@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Package, CheckCircle2, Clock, XCircle, Users, Store } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -18,6 +19,8 @@ import {
   getStorePerformance,
   getUserPerformance,
   getZoneOptions,
+  getStateOptions,
+  getStoreOptions,
   type Granularity,
 } from "@/lib/data/analytics";
 import { formatPercent } from "@/lib/utils";
@@ -25,14 +28,24 @@ import { formatPercent } from "@/lib/utils";
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ granularity?: string; days?: string; zone?: string }>;
+  searchParams: Promise<{
+    granularity?: string;
+    days?: string;
+    zone?: string;
+    state?: string;
+    storeId?: string;
+    status?: string;
+  }>;
 }) {
   const params = await searchParams;
   const granularity = (params.granularity as Granularity) ?? "day";
   const days = params.days ? Number(params.days) : 30;
   const zone = params.zone;
+  const state = params.state;
+  const storeId = params.storeId;
+  const status = params.status;
 
-  const filters = { days, granularity, zone };
+  const filters = { days, granularity, zone, state, storeId, status };
 
   const [overview, storePerf, userPerf] = await Promise.all([
     getAnalyticsOverview(filters),
@@ -40,6 +53,20 @@ export default async function AnalyticsPage({
     getUserPerformance(filters),
   ]);
   const zones = getZoneOptions();
+  const states = getStateOptions();
+  const stores = getStoreOptions();
+
+  function withFilter(key: string, value: string) {
+    const search = new URLSearchParams();
+    if (granularity !== "day") search.set("granularity", granularity);
+    if (days !== 30) search.set("days", String(days));
+    if (zone) search.set("zone", zone);
+    if (state) search.set("state", state);
+    if (storeId) search.set("storeId", storeId);
+    if (status) search.set("status", status);
+    search.set(key, value);
+    return `/analytics?${search.toString()}`;
+  }
 
   const kpis = [
     { label: "Total Órdenes", value: overview.totalOrders.toLocaleString("es-MX"), icon: Package, tone: "default" as const },
@@ -67,7 +94,7 @@ export default async function AnalyticsPage({
         </p>
       </div>
 
-      <AnalyticsFilterBar zones={zones} />
+      <AnalyticsFilterBar zones={zones} states={states} stores={stores} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
         {kpis.map((kpi) => {
@@ -92,20 +119,39 @@ export default async function AnalyticsPage({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <BreakdownBars
-          title="Por Estado (operación)"
+          title="Por Estatus (operación)"
           items={overview.statusBreakdown.map((s) => ({ label: s.status, count: s.count }))}
+          hrefFor={(label) => {
+            const code = overview.statusBreakdown.find((s) => s.status === label)?.code ?? label;
+            return withFilter("status", code);
+          }}
         />
         <BreakdownBars
           title="Por Zona"
           items={overview.zoneBreakdown.map((z) => ({ label: z.zone, count: z.count, onTimePct: z.onTimePct }))}
           showOnTimePct
+          hrefFor={(label) => withFilter("zone", label)}
         />
         <BreakdownBars
           title="Por Estado (geográfico)"
           items={overview.stateBreakdown.map((s) => ({ label: s.state, count: s.count, onTimePct: s.onTimePct }))}
           showOnTimePct
+          hrefFor={(label) => withFilter("state", label)}
         />
       </div>
+
+      {(zone || state || storeId || status) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>Filtros activos:</span>
+          {zone && <Badge variant="muted">Zona: {zone}</Badge>}
+          {state && <Badge variant="muted">Estado: {state}</Badge>}
+          {storeId && <Badge variant="muted">Tienda: {stores.find((s) => s.id === storeId)?.name ?? storeId}</Badge>}
+          {status && <Badge variant="muted">Estatus: {status}</Badge>}
+          <Link href="/analytics" className="text-primary hover:underline">
+            Limpiar filtros
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card className="overflow-hidden">

@@ -17,7 +17,15 @@ const PERIOD_OPTIONS = [
   { value: "90", label: "90 días" },
 ];
 
-export function AnalyticsFilterBar({ zones }: { zones: string[] }) {
+export function AnalyticsFilterBar({
+  zones,
+  states,
+  stores,
+}: {
+  zones: string[];
+  states: string[];
+  stores: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -34,9 +42,12 @@ export function AnalyticsFilterBar({ zones }: { zones: string[] }) {
   const granularity = searchParams.get("granularity") ?? "day";
   const days = searchParams.get("days") ?? "30";
   const zone = searchParams.get("zone") ?? "ALL";
+  const state = searchParams.get("state") ?? "ALL";
+  const storeId = searchParams.get("storeId") ?? "ALL";
+  const status = searchParams.get("status") ?? "ALL";
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <Tabs value={granularity} onValueChange={(v) => updateParams({ granularity: v })}>
         <TabsList>
           <TabsTrigger value="day">Día</TabsTrigger>
@@ -45,9 +56,37 @@ export function AnalyticsFilterBar({ zones }: { zones: string[] }) {
         </TabsList>
       </Tabs>
 
-      <div className="flex items-center gap-2">
-        <Select value={zone} onValueChange={(v) => updateParams({ zone: v === "ALL" ? null : v })}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={storeId} onValueChange={(v) => updateParams({ storeId: v === "ALL" ? null : v })}>
           <SelectTrigger className="w-48">
+            <SelectValue placeholder="Tienda" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Todas las tiendas</SelectItem>
+            {stores.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={state} onValueChange={(v) => updateParams({ state: v === "ALL" ? null : v })}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Estado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Todos los estados</SelectItem>
+            {states.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={zone} onValueChange={(v) => updateParams({ zone: v === "ALL" ? null : v })}>
+          <SelectTrigger className="w-40">
             <SelectValue placeholder="Zona" />
           </SelectTrigger>
           <SelectContent>
@@ -57,6 +96,19 @@ export function AnalyticsFilterBar({ zones }: { zones: string[] }) {
                 {z}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={status} onValueChange={(v) => updateParams({ status: v === "ALL" ? null : v })}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Estatus" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Todos los estatus</SelectItem>
+            <SelectItem value="DELIVERED">Entregado</SelectItem>
+            <SelectItem value="CANCELLED">Cancelado</SelectItem>
+            <SelectItem value="IN_PROGRESS">En progreso</SelectItem>
+            <SelectItem value="LATE">Retrasado</SelectItem>
           </SelectContent>
         </Select>
 

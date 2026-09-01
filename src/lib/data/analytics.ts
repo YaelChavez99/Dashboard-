@@ -8,6 +8,7 @@ export interface AnalyticsFilters {
   days?: number;
   granularity?: Granularity;
   zone?: string;
+  state?: string;
   storeId?: string;
   status?: string;
 }
@@ -23,6 +24,7 @@ export interface TrendPoint {
 
 export interface StatusBreakdownItem {
   status: string;
+  code: string;
   count: number;
   pct: number;
 }
@@ -105,6 +107,7 @@ function applyFilters(rows: MockOrder[], filters: AnalyticsFilters): MockOrder[]
   out = out.filter((o) => o.date >= cutoff);
 
   if (filters.zone) out = out.filter((o) => o.store.zone === filters.zone);
+  if (filters.state) out = out.filter((o) => o.store.state === filters.state);
   if (filters.storeId) out = out.filter((o) => o.store.id === filters.storeId);
   if (filters.status) out = out.filter((o) => o.status === filters.status);
   return out;
@@ -131,7 +134,7 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
     const statusCounts = new Map<string, number>();
     for (const o of rows) statusCounts.set(o.status, (statusCounts.get(o.status) ?? 0) + 1);
     const statusBreakdown: StatusBreakdownItem[] = Array.from(statusCounts.entries())
-      .map(([status, count]) => ({ status: STATUS_LABELS[status] ?? status, count, pct: rows.length ? count / rows.length : 0 }))
+      .map(([status, count]) => ({ status: STATUS_LABELS[status] ?? status, code: status, count, pct: rows.length ? count / rows.length : 0 }))
       .sort((a, b) => b.count - a.count);
 
     const zoneMap = new Map<string, { count: number; onTime: number }>();
@@ -207,7 +210,7 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
   const statusCounts = new Map<string, number>();
   for (const o of rows) statusCounts.set(o.status, (statusCounts.get(o.status) ?? 0) + 1);
   const statusBreakdown: StatusBreakdownItem[] = Array.from(statusCounts.entries())
-    .map(([status, count]) => ({ status: STATUS_LABELS[status] ?? status, count, pct: rows.length ? count / rows.length : 0 }))
+    .map(([status, count]) => ({ status: STATUS_LABELS[status] ?? status, code: status, count, pct: rows.length ? count / rows.length : 0 }))
     .sort((a, b) => b.count - a.count);
 
   const delivered = rows.filter((o) => o.status === "DELIVERED");
@@ -349,6 +352,29 @@ export async function getUserPerformance(filters: AnalyticsFilters): Promise<Use
 export function getZoneOptions() {
   if (isDemoMode()) {
     return Array.from(new Set(ORDERS.map((o) => o.store.zone))).sort();
+  }
+  return [];
+}
+
+export function getStateOptions() {
+  if (isDemoMode()) {
+    return Array.from(new Set(ORDERS.map((o) => o.store.state))).sort();
+  }
+  return [];
+}
+
+export interface StoreOption {
+  id: string;
+  name: string;
+}
+
+export function getStoreOptions(): StoreOption[] {
+  if (isDemoMode()) {
+    const map = new Map<string, string>();
+    for (const o of ORDERS) map.set(o.store.id, o.store.name);
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
   return [];
 }
