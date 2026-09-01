@@ -3,6 +3,7 @@ import { Database, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SyncButton } from "@/components/dashboard/sync-button";
+import { CsvUploadForm } from "@/components/dashboard/csv-upload-form";
 import { DemoModeBanner } from "@/components/dashboard/demo-mode-banner";
 import { getRecentSyncLogs } from "@/lib/data/sync-logs";
 import { isDemoMode } from "@/lib/data/demo-mode";
@@ -72,6 +73,15 @@ export default async function AdminPage() {
               Deshabilitado en modo demo — conecta Supabase y Google Sheets (ver .env.example) para activarlo.
             </p>
           )}
+
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-medium text-muted-foreground">Carga manual (mientras se habilita BigQuery)</p>
+            <p className="mt-1 mb-3 text-xs text-muted-foreground">
+              Exporta la tabla <code className="rounded bg-muted px-1 py-0.5">ext_bodega_aurrera</code> desde BigQuery
+              como CSV y súbela aquí para poblar el dashboard sin esperar el acceso automatizado.
+            </p>
+            <CsvUploadForm disabled={isDemoMode()} />
+          </div>
         </CardContent>
       </Card>
 

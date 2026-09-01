@@ -9,6 +9,7 @@ import type {
   ParsedPaymentValidation,
   ParsedBonus,
 } from "./parsers";
+import type { DerivedStore, DerivedUser } from "./bigquery-parsers";
 
 export interface StepResult {
   read: number;
@@ -43,6 +44,62 @@ export async function upsertUsers(rows: ParsedUser[]): Promise<{ result: StepRes
   return {
     result: { read: rows.length, inserted: deduped.length, updated: 0, errors: error ? 1 : 0, errorDetail: error },
     idByPhone,
+  };
+}
+
+/**
+ * Users derived from BigQuery orders (email only, no phone) — upserts on
+ * email instead of phone, since that natural key isn't available from
+ * this source. See 0005_operational_sync.sql (phone is nullable now).
+ */
+export async function upsertUsersFromBigQuery(
+  rows: DerivedUser[]
+): Promise<{ result: StepResult; idByEmail: Map<string, string> }> {
+  const supabase = createServiceRoleClient();
+  const deduped = dedupeByKey(rows, (r) => r.email);
+
+  const { data, error } = await supabase
+    .from("users")
+    .upsert(
+      deduped.map((r) => ({ email: r.email, full_name: r.fullName || null })),
+      { onConflict: "email" }
+    )
+    .select("id, email");
+
+  const idByEmail = new Map<string, string>((data ?? []).map((u) => [u.email, u.id]));
+  return {
+    result: { read: rows.length, inserted: deduped.length, updated: 0, errors: error ? 1 : 0, errorDetail: error },
+    idByEmail,
+  };
+}
+
+/**
+ * Stores derived from BigQuery orders (no tariff model / parking info —
+ * that only lives in the paused Configuración de Tiendas sheet).
+ */
+export async function upsertStoresFromBigQuery(
+  rows: DerivedStore[]
+): Promise<{ result: StepResult; idByExtId: Map<string, string> }> {
+  const supabase = createServiceRoleClient();
+  const deduped = dedupeByKey(rows, (r) => r.storeExtId);
+
+  const { data, error } = await supabase
+    .from("stores")
+    .upsert(
+      deduped.map((r) => ({
+        store_number: r.storeNumber,
+        store_ext_id: r.storeExtId,
+        name: r.name,
+        state: r.state,
+      })),
+      { onConflict: "store_ext_id" }
+    )
+    .select("id, store_ext_id");
+
+  const idByExtId = new Map<string, string>((data ?? []).map((s) => [s.store_ext_id, s.id]));
+  return {
+    result: { read: rows.length, inserted: deduped.length, updated: 0, errors: error ? 1 : 0, errorDetail: error },
+    idByExtId,
   };
 }
 
