@@ -1,50 +1,63 @@
-# Esquema de base de datos — para TechOps
+# Base de datos y autenticación — para TechOps
 
-Este documento resume qué tipo de base de datos necesita esta app y el DDL
-completo, para que TechOps sepa qué aprovisionar al migrar fuera de Supabase.
+Este documento resume la base de datos y el login de la app, para
+provisionar Cloud SQL y el OAuth Client de Google Workspace.
 
-## Motor requerido
+## Motor: Cloud SQL for SQL Server
 
-**PostgreSQL 14+.** El esquema usa tipos `uuid`, `jsonb`, `numeric`,
-`timestamptz`, la extensión `pgcrypto` (para `gen_random_uuid()`), enums
-nativos, índices, una vista, un trigger y Row Level Security (RLS).
+Confirmado con TI — el esquema vive en `prisma/schema.prisma` (Prisma
+ORM, provider `sqlserver`), traducido desde el diseño original en
+Postgres (`supabase/migrations/`, ya retirado). Diferencias deliberadas
+frente al diseño original:
 
-## ⚠️ Dependencia de Supabase Auth — leer antes de aprovisionar
+- **Sin enums nativos** (SQL Server/Prisma no los soportan) — los
+  campos de estatus (`role`, estados de pago/reconciliación/sync) son
+  `String`, con los mismos valores permitidos ya tipados en
+  `src/types/database.ts`.
+- **Sin Row Level Security a nivel de base de datos.** El login ya no
+  es Supabase Auth, así que no existe un `auth.uid()` del cual colgar
+  políticas RLS — la autorización (por rol, por tienda/zona) se aplica
+  100% en la capa de aplicación (`src/lib/data/*.ts` + rutas API), como
+  ya pasaba para los roles OPERATIONS/VIEWER incluso antes.
+- **Relaciones sin cascada automática** (`onDelete/onUpdate: NoAction`
+  en todo el esquema) — SQL Server no permite que varias rutas de
+  cascada lleguen a la misma tabla, y para datos financieros es más
+  seguro que un borrado nunca dispare cambios en cadena sin que la app
+  lo controle explícitamente.
+- **`reconciliation.difference`** se calcula en la app, no es columna
+  generada por la base de datos (Prisma no soporta columnas generadas
+  en SQL Server).
+- **No existe `v_payment_ledger`** como vista — el mismo join
+  (orders + finance_submissions + payments) se hace en código
+  (`src/lib/data/payments.ts` / `users.ts`).
 
-El esquema **no es un Postgres genérico plano**: varias piezas asumen el
-esquema `auth` que provee Supabase Auth (Supabase corre sobre GoTrue +
-Postgres, y expone la tabla `auth.users` y funciones `auth.uid()` /
-`auth.role()` dentro de la misma base de datos):
+## Autenticación: Google Workspace (`zubale.com`)
 
-- `profiles.id` es **foreign key a `auth.users(id)`** — la tabla de
-  usuarios de autenticación.
-- El trigger `on_auth_user_created` (`0004_profile_trigger.sql`) se
-  dispara sobre `auth.users` para crear el perfil automáticamente al
-  registrarse.
-- Todas las políticas RLS usan `auth.role() = 'authenticated'` y
-  `auth.uid()` — funciones que expone Supabase, no Postgres puro.
-- El login de la app usa `@supabase/ssr` (Supabase Auth), no un proveedor
-  de auth genérico.
+Login vía NextAuth/Auth.js (`src/lib/auth.ts`) con Google OAuth,
+restringido al dominio `zubale.com` (se valida el claim `hd` de Google,
+no solo el sufijo del correo). No usa Supabase Auth ni ningún otro
+proveedor externo.
 
-**Esto significa que si TechOps aprovisiona un Cloud SQL / Postgres
-genérico (sin Supabase), el login y el auto-registro de perfiles no van a
-funcionar tal cual** — hace falta una de estas dos rutas, y vale la pena
-que Eliab/TechOps opinen cuál prefieren antes de migrar:
+**Lo que TechOps necesita crear:** un OAuth Client ID en Google Cloud
+Console, dentro del proyecto de Zubale, con
+`https://<dominio-del-deploy>/api/auth/callback/google` como redirect
+URI autorizado. El Client ID y Client Secret resultantes van como
+secrets (`AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`) — ver `.env.example`
+y `cloudbuild.yaml`.
 
-1. **Supabase self-hosted** dentro de la infraestructura de Zubale (mismo
-   motor, mismo esquema `auth`, cero cambios de código) — la ruta más
-   simple.
-2. **Postgres genérico + reemplazar el proveedor de auth** (ej. su propio
-   SSO/IdP interno) — requiere que yo adapte `profiles`, el trigger y las
-   políticas RLS al nuevo proveedor antes de que funcione el login.
+`profiles` (la tabla de cuentas de login, con el rol
+ADMIN/FINANCE/OPERATIONS/VIEWER) se provisiona sola en el primer login
+de cada persona — antes esto lo hacía un trigger de Supabase sobre
+`auth.users`; ahora lo hace el callback `signIn` de NextAuth
+directamente contra Prisma.
 
 ## Tablas
 
 | Tabla | Origen (hoja real) | Notas |
 |---|---|---|
 | `zones` | `ZONA_CLASIFICACION` en Data BA | catálogo de zonas |
-| `stores` | Configuración de Tiendas | tarifa/zona opcionales desde BigQuery (`0005`) |
-| `users` | Usuarios / derivado de BigQuery | `phone` ahora opcional, `email` único (`0005`) |
+| `stores` | Configuración de Tiendas | tarifa/zona opcionales desde BigQuery |
+| `users` | Usuarios / derivado de BigQuery | `phone` opcional, `email` único |
 | `tariffs` | Tarifa_Piano | lookup de tarifas por modelo/líneas/km |
 | `orders` | Data BA | GENERADO — pedidos operativos |
 | `finance_submissions` | Reporte de Pagos | ENVIADO_A_FINANZAS |
@@ -52,23 +65,17 @@ que Eliab/TechOps opinen cuál prefieren antes de migrar:
 | `payments` | 1st/2nd Payment | PAGADO |
 | `reconciliation` | derivada | comparación generado/enviado/pagado |
 | `bonuses` | Bonos-Supply | bonos, no es parte del flujo de pagos |
-| `profiles` | solo-app | perfil + rol, requiere `auth.users` (ver arriba) |
+| `profiles` | solo-app | cuenta de login — rol, tienda, zona |
 | `sync_logs` | solo-app | bitácora de sincronización |
 | `audit_logs` | solo-app | auditoría |
 
-Vista `v_payment_ledger`: ledger aplanado que une `orders` +
-`finance_submissions` + `payments` para `/payments` y el export CSV.
+## Provisionar
 
-## DDL completo
-
-Las migraciones, en orden, están en `supabase/migrations/`:
-
-1. `0001_init.sql` — esquema inicial completo (enums, tablas, índices, RLS)
-2. `0002_views.sql` — vista `v_payment_ledger`
-3. `0003_bonuses.sql` — tabla `bonuses`
-4. `0004_profile_trigger.sql` — trigger de auto-registro de perfil
-5. `0005_operational_sync.sql` — columnas opcionales para la fuente BigQuery
-
-Aplíquenlas en ese orden tal cual (son idempotentes con `if not exists`
-donde aplica). No hace falta que yo las concatene — son el DDL real y
-único que corre hoy contra Supabase.
+1. Cloud SQL for SQL Server — crear la instancia y una base de datos.
+2. Pasarnos la connection string como `DATABASE_URL` (secret, ver
+   `.env.example` para el formato exacto).
+3. Correr `npx prisma db push` (o `prisma migrate deploy` si prefieren
+   migraciones versionadas) contra esa base para crear las tablas desde
+   `prisma/schema.prisma` — no hace falta escribir DDL a mano.
+4. Crear el OAuth Client de Google Workspace (arriba) y pasarnos
+   `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`.

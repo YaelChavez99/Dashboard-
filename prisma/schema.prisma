@@ -1,0 +1,365 @@
+// Finance & Operations Control — SQL Server schema (Cloud SQL)
+//
+// Translated from supabase/migrations/*.sql (Postgres). Key differences
+// from the original Postgres/Supabase schema, all deliberate:
+//
+// - No native enum type on SQL Server (Prisma limitation) — enum columns
+//   (role, payment flow/reconciliation/sync status) are `String` here,
+//   with the same union types enforced in TypeScript (src/types/database.ts
+//   already worked this way even under Postgres).
+// - No Row Level Security here. Auth moved from Supabase Auth to Google
+//   Workspace OAuth (NextAuth) — there's no DB-level "auth.uid()" to hang
+//   RLS policies off anymore, so authorization is enforced entirely in
+//   the app layer (src/lib/data/*.ts + route handlers), same as the
+//   fine-grained (per-store/zone) scoping already was under the old setup.
+// - `profiles` no longer references a Supabase `auth.users` table (that
+//   table doesn't exist here). It's keyed by `google_id` (the Google
+//   account's stable `sub` claim) instead, provisioned on first sign-in
+//   by the NextAuth callback (see src/lib/auth.ts) instead of a DB
+//   trigger.
+// - `reconciliation.difference` was a Postgres generated/stored column
+//   (`submitted_amount - paid_amount`) — Prisma has no generated-column
+//   attribute, so it's computed in the app instead of the DB.
+// - `v_payment_ledger` (a Postgres view) isn't modeled here — the same
+//   join is done in application code via Prisma relations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// CORE REFERENCE TABLES
+// ============================================================
+
+// ZONA_CLASIFICACION in Data BA
+model Zone {
+  id         String   @id @default(uuid()) @db.UniqueIdentifier
+  name       String   @unique
+  created_at DateTime @default(now())
+
+  stores  Store[]
+  orders  Order[]
+  profiles Profile[]
+
+  @@map("zones")
+}
+
+// Hoja "Configuración de Tiendas | Asignación de Modelo de Pago"
+model Store {
+  id               String   @id @default(uuid()) @db.UniqueIdentifier
+  store_number     String   @unique // STORE_NUMBER
+  store_ext_id     String   @unique // STORE_ID — join key with Data BA / Master Pagos
+  name             String // STORE_NAME
+  state            String? // from BigQuery source (0005) — geographic state
+  zone_id          String?  @db.UniqueIdentifier
+  tariff_model     String? // MODELO (M99 / M105 / M109 / M119 ...) — optional (0005)
+  charges_parking  Boolean  @default(false) // PAGO DE ESTACIONAMIENTO
+  parking_amount   Decimal? @db.Decimal(12, 2) // MONTO ESTACIONAMIENTO
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now())
+
+  zone                Zone?               @relation(fields: [zone_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orders              Order[]
+  finance_submissions FinanceSubmission[]
+  payment_claims      PaymentClaim[]
+  payments            Payment[]
+  reconciliation      Reconciliation[]
+  bonuses             Bonus[]
+  profiles            Profile[]
+
+  @@index([zone_id])
+  @@map("stores")
+}
+
+// Hoja "Usuarios | Dato de Usuarios Bodega Aurrera" — shoppers/couriers,
+// distinct from `profiles` (login accounts). Natural key used to be the
+// phone number; BigQuery-derived rows only have email (0005), so phone
+// is optional and email is the alternate unique key.
+model AppUser {
+  id         String   @id @default(uuid()) @db.UniqueIdentifier
+  phone      String?  @unique // TELEFONO / USER / TELEFONO BD
+  full_name  String? // NOMBRE / SHOPPER_FULL_NAME
+  email      String?  @unique // CORREO ELECTRONICO / SHOPPER_EMAIL
+  status     String   @default("ACTIVE")
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  orders              Order[]
+  finance_submissions FinanceSubmission[]
+  payment_claims      PaymentClaim[]
+  payments            Payment[]
+  reconciliation      Reconciliation[]
+  bonuses             Bonus[]
+
+  @@map("users")
+}
+
+// Hoja "Tarifa_Piano" — lookup used to compute GENERADO from
+// model + lines + distance.
+model Tariff {
+  id         String   @id @default(uuid()) @db.UniqueIdentifier
+  model      String // TARIFA (M99, M105, M109, M119...)
+  lines_min  Int
+  lines_max  Int
+  km_min     Decimal  @db.Decimal(6, 2)
+  km_max     Decimal  @db.Decimal(6, 2)
+  amount     Decimal  @db.Decimal(12, 2) // PAGO
+  created_at DateTime @default(now())
+
+  orders Order[]
+
+  @@unique([model, lines_min, lines_max, km_min, km_max])
+  @@index([model])
+  @@map("tariffs")
+}
+
+// ============================================================
+// GENERADO — Hoja "Data BA"
+// ============================================================
+
+model Order {
+  id                String    @id @default(uuid()) @db.UniqueIdentifier
+  order_id          String    @unique // ORDER_ID
+  status            String // STATUS (DELIVERED, CANCELLED, ...)
+  store_id          String?   @db.UniqueIdentifier
+  delivery_date     DateTime? // DELIVERY_DATE
+  slot              String? // SLOT
+  on_time           Boolean?
+  distance_km       Decimal?  @db.Decimal(10, 4) // DISTANCE_MAN_HAV
+  user_id           String?   @db.UniqueIdentifier // matched via SHOPPER_EMAIL / SHOPPER_FULL_NAME
+  lines_requested   Int? // NO_LINES_REQUESTED
+  is_late           Boolean   @default(false) // PEDIDOS_LATE
+  zone_id           String?   @db.UniqueIdentifier // ZONA_CLASIFICACION
+  clean_date        DateTime? @db.Date // FECHA_LIMPIA
+  generated_amount  Decimal?  @db.Decimal(12, 2)
+  tariff_id         String?   @db.UniqueIdentifier
+  raw_row           String?   @db.NVarChar(Max) // JSON, original row for audit/debugging
+  created_at        DateTime  @default(now())
+
+  store          Store?          @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user           AppUser?        @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone           Zone?           @relation(fields: [zone_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tariff         Tariff?         @relation(fields: [tariff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reconciliation Reconciliation[]
+
+  @@index([store_id])
+  @@index([user_id])
+  @@index([zone_id])
+  @@index([delivery_date])
+  @@index([clean_date])
+  @@map("orders")
+}
+
+// ============================================================
+// ENVIADO A FINANZAS — Hoja "Reporte de Pagos BA-MX | Layout Pagos"
+// ============================================================
+
+model FinanceSubmission {
+  id                     String   @id @default(uuid()) @db.UniqueIdentifier
+  submitted_date         DateTime @db.Date // FECHA
+  store_id               String?  @db.UniqueIdentifier // STORE ID
+  user_id                String?  @db.UniqueIdentifier // USER
+  description            String? // DESCRIPTION (e.g. "Task: ... dd/mm")
+  amount                 Decimal  @db.Decimal(12, 2) // AMOUNT
+  tariff_model           String? // MODEL
+  // MASTER_PAGOS = Aprobado/NO. Submission approval, NOT payment
+  // confirmation — never collapse this into "paid".
+  master_pagos_approved  Boolean  @default(false)
+  order_id               String?  @db.UniqueIdentifier // matched by task ref inside DESCRIPTION
+  raw_row                String?  @db.NVarChar(Max)
+  created_at             DateTime @default(now())
+
+  store Store?   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user  AppUser? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([store_id])
+  @@index([user_id])
+  @@index([submitted_date])
+  @@map("finance_submissions")
+}
+
+// ============================================================
+// Aclaración de Pagos — the Google Form destination sheet. This is the
+// one place the source already tracks GENERADO -> ENVIADO -> PAGADO
+// explicitly per claim.
+// ============================================================
+
+model PaymentClaim {
+  id               String   @id @default(uuid()) @db.UniqueIdentifier
+  submitted_at     DateTime // Marca temporal
+  claim_date       DateTime? @db.Date // Fecha
+  folio            String? // Folio
+  user_phone       String? // Teléfono User
+  evidence_url     String? // Evidencia
+  status           String? // ESTATUS
+  db_date          DateTime? @db.Date // FECHA BD
+  proceeds         Boolean? // PROCEDE
+  store_id         String?  @db.UniqueIdentifier // STORE ID
+  db_phone         String? // TELEFONO BD
+  description      String? // DESCRIPCION
+  amount           Decimal? @db.Decimal(12, 2) // AMOUNT
+  send_status      String? // ESTATUS ENVÍO
+  paid_in_master   Boolean  @default(false) // PAGADO EN MASTER
+  comments         String? // COMENTARIOS
+  user_id          String?  @db.UniqueIdentifier
+  raw_row          String?  @db.NVarChar(Max)
+  created_at       DateTime @default(now())
+
+  store Store?   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user  AppUser? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([user_id])
+  @@index([store_id])
+  @@index([submitted_at])
+  @@map("payment_claims")
+}
+
+// ============================================================
+// PAGADO — Hojas "1st Payment" / "2nd Payment" / "Payment Validation"
+// ============================================================
+
+model Payment {
+  id             String   @id @default(uuid()) @db.UniqueIdentifier
+  user_id        String   @db.UniqueIdentifier // USER
+  store_id       String?  @db.UniqueIdentifier // Store
+  period_label   String? // e.g. "2-3-4 Jul 2026"
+  payment_round  Int // 1 = 1st Payment, 2 = 2nd Payment
+  task_ref       String? // Task
+  amount         Decimal  @db.Decimal(12, 2) // Payment / Real Payment Amount / Total Payment
+  adjustment     Decimal  @default(0) @db.Decimal(12, 2) // Adjustment
+  matched        Boolean? // Match (TRUE/FALSE)
+  paid_at        DateTime? @db.Date
+  raw_row        String?  @db.NVarChar(Max)
+  created_at     DateTime @default(now())
+
+  user  AppUser @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  store Store?  @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([user_id])
+  @@index([store_id])
+  @@index([paid_at])
+  @@map("payments")
+}
+
+// ============================================================
+// RECONCILIATION — derived table comparing the three amounts.
+// `difference` is computed in the app (submitted_amount - paid_amount),
+// not a DB generated column (Prisma/SQL Server don't model that here).
+// ============================================================
+
+model Reconciliation {
+  id                String   @id @default(uuid()) @db.UniqueIdentifier
+  period_label      String?
+  user_id           String?  @db.UniqueIdentifier
+  store_id          String?  @db.UniqueIdentifier
+  order_id          String?  @db.UniqueIdentifier
+  generated_amount  Decimal  @default(0) @db.Decimal(12, 2)
+  submitted_amount  Decimal  @default(0) @db.Decimal(12, 2)
+  paid_amount       Decimal  @default(0) @db.Decimal(12, 2)
+  status            String   @default("PENDIENTE")
+  computed_at       DateTime @default(now())
+
+  user  AppUser? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  store Store?   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order Order?   @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([user_id])
+  @@index([store_id])
+  @@index([status])
+  @@map("reconciliation")
+}
+
+// Bonos-Supply — no explicit "Aprobado"/"Pagado" status column in the
+// source, only a "Payment check" boolean, so `payment_checked` stays a
+// verification signal — never collapsed into "paid" without more
+// evidence.
+model Bonus {
+  id               String   @id @default(uuid()) @db.UniqueIdentifier
+  bonus_date       DateTime @db.Date // DATE
+  week_service     String? // WEEK SERVICE
+  brand            String // BRAND (filtered to 'Bodega Aurrera' at sync time)
+  area             String? // AREA
+  owner            String? // OWNER
+  typo             String // TYPO (bonus type/category)
+  store_id         String?  @db.UniqueIdentifier // STORE ID
+  user_id          String?  @db.UniqueIdentifier // USER
+  description      String? // DESCRIPTION
+  amount           Decimal  @db.Decimal(12, 2) // AMOUNT
+  payment_checked  Boolean  @default(false) // "Payment check"
+  ot               String? // OT
+  validation       String? // Validación
+  comments         String? // Comentario
+  raw_row          String?  @db.NVarChar(Max)
+  created_at       DateTime @default(now())
+
+  store Store?   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user  AppUser? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([store_id])
+  @@index([user_id])
+  @@index([bonus_date])
+  @@index([typo])
+  @@map("bonuses")
+}
+
+// ============================================================
+// PLATFORM TABLES (app-only, not present in the source Sheets)
+// ============================================================
+
+// Login account (ADMIN/FINANCE/OPERATIONS/VIEWER) — keyed by the
+// Google Workspace account's stable id, provisioned on first sign-in
+// via the NextAuth callback (src/lib/auth.ts), not a DB trigger.
+model Profile {
+  id         String   @id @default(uuid()) @db.UniqueIdentifier
+  google_id  String   @unique // Google OAuth `sub` claim
+  email      String   @unique // must be @zubale.com — enforced in the NextAuth signIn callback
+  full_name  String?
+  role       String   @default("VIEWER") // ADMIN | FINANCE | OPERATIONS | VIEWER
+  store_id   String?  @db.UniqueIdentifier
+  zone_id    String?  @db.UniqueIdentifier
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  store Store? @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone  Zone?  @relation(fields: [zone_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("profiles")
+}
+
+model SyncLog {
+  id                String    @id @default(uuid()) @db.UniqueIdentifier
+  source_sheet      String
+  started_at        DateTime  @default(now())
+  finished_at       DateTime?
+  status            String    @default("RUNNING") // RUNNING | SUCCESS | PARTIAL | FAILED
+  records_read      Int       @default(0)
+  records_inserted  Int       @default(0)
+  records_updated   Int       @default(0)
+  errors_count      Int       @default(0)
+  error_detail      String?   @db.NVarChar(Max)
+  triggered_by      String?   @db.UniqueIdentifier // Profile.id
+
+  @@index([started_at(sort: Desc)])
+  @@map("sync_logs")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.UniqueIdentifier
+  actor_id     String?  @db.UniqueIdentifier // Profile.id
+  actor_email  String?
+  action       String
+  entity_type  String
+  entity_id    String?
+  old_value    String?  @db.NVarChar(Max)
+  new_value    String?  @db.NVarChar(Max)
+  created_at   DateTime @default(now())
+
+  @@index([entity_type, entity_id])
+  @@index([created_at(sort: Desc)])
+  @@map("audit_logs")
+}

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import { totalsForPeriod, STORES, USERS } from "./mock-dataset";
 
@@ -92,23 +92,24 @@ function getDemoOverviewData(periodDays: number): OverviewData {
 }
 
 async function getLiveOverviewData(periodDays: number): Promise<OverviewData> {
-  const supabase = await createClient();
   const since = new Date();
   since.setDate(since.getDate() - periodDays);
-  const sinceIso = since.toISOString();
 
-  const [{ data: submissions }, { data: payments }, { data: orders }, { count: userCount }, { count: storeCount }] =
-    await Promise.all([
-      supabase.from("finance_submissions").select("amount, submitted_date").gte("submitted_date", sinceIso),
-      supabase.from("payments").select("amount, paid_at").gte("paid_at", sinceIso),
-      supabase.from("orders").select("generated_amount, delivery_date").gte("delivery_date", sinceIso),
-      supabase.from("users").select("id", { count: "exact", head: true }),
-      supabase.from("stores").select("id", { count: "exact", head: true }),
-    ]);
+  const [submissionsAgg, paymentsAgg, ordersAgg, userCount, storeCount] = await Promise.all([
+    db.financeSubmission.aggregate({ _sum: { amount: true }, where: { submitted_date: { gte: since } } }),
+    db.payment.aggregate({ _sum: { amount: true }, where: { paid_at: { gte: since } } }),
+    db.order.aggregate({
+      _sum: { generated_amount: true },
+      _count: { _all: true },
+      where: { delivery_date: { gte: since } },
+    }),
+    db.appUser.count(),
+    db.store.count(),
+  ]);
 
-  const generated = (orders ?? []).reduce((s, r) => s + (r.generated_amount ?? 0), 0);
-  const submitted = (submissions ?? []).reduce((s, r) => s + (r.amount ?? 0), 0);
-  const paid = (payments ?? []).reduce((s, r) => s + (r.amount ?? 0), 0);
+  const generated = Number(ordersAgg._sum.generated_amount ?? 0);
+  const submitted = Number(submissionsAgg._sum.amount ?? 0);
+  const paid = Number(paymentsAgg._sum.amount ?? 0);
 
   const totals: OverviewTotals = {
     generated,
@@ -116,14 +117,14 @@ async function getLiveOverviewData(periodDays: number): Promise<OverviewData> {
     paid,
     pendingSubmission: Math.max(generated - submitted, 0),
     pendingPayment: Math.max(submitted - paid, 0),
-    userCount: userCount ?? 0,
-    storeCount: storeCount ?? 0,
-    transactionCount: orders?.length ?? 0,
+    userCount,
+    storeCount,
+    transactionCount: ordersAgg._count._all,
   };
 
   // Previous-period comparison and daily trend are left as a follow-up:
-  // once real volume is known these should be Postgres views/RPCs
-  // (see supabase/migrations) rather than client-side aggregation.
+  // once real volume is known these should be SQL Server views/RPCs
+  // rather than client-side aggregation.
   return {
     totals,
     previousTotals: totals,

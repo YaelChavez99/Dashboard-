@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { isDemoMode } from "@/lib/data/demo-mode";
 import type { Profile } from "@/types/database";
 
@@ -23,39 +24,38 @@ const DEMO_USER: CurrentUser = {
 };
 
 /**
- * Resolves the signed-in user's profile (role, store, zone).
- * Falls back to a VIEWER profile if the `profiles` row hasn't been
- * provisioned yet — the row is normally created by a DB trigger on
- * auth.users insert (see supabase/migrations).
+ * Resolves the signed-in user's profile (role, store, zone). Falls back
+ * to a VIEWER profile if the `profiles` row somehow hasn't been
+ * provisioned yet — it's normally created by the NextAuth signIn
+ * callback on first login (see src/lib/auth.ts).
  */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (isDemoMode()) return DEMO_USER;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await auth();
+  const googleId = (session as { googleId?: string } | null)?.googleId;
+  if (!session?.user || !googleId) return null;
 
-  if (!user) return null;
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, store_id, zone_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await db.profile.findUnique({ where: { google_id: googleId } });
 
   return {
-    id: user.id,
-    email: user.email ?? null,
-    profile:
-      profile ??
-      ({
-        id: user.id,
-        full_name: user.email ?? null,
-        role: "VIEWER",
-        store_id: null,
-        zone_id: null,
-      } satisfies Profile),
+    id: profile?.id ?? googleId,
+    email: session.user.email ?? null,
+    profile: profile
+      ? {
+          id: profile.id,
+          full_name: profile.full_name,
+          role: profile.role as Profile["role"],
+          store_id: profile.store_id,
+          zone_id: profile.zone_id,
+        }
+      : {
+          id: googleId,
+          full_name: session.user.email ?? null,
+          role: "VIEWER",
+          store_id: null,
+          zone_id: null,
+        },
   };
 }
 

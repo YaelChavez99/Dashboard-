@@ -2,22 +2,23 @@ import { queryBigQuery } from "@/lib/google/bigquery-client";
 import { parseBigQueryOrders, deriveStoresFromBigQuery, deriveUsersFromBigQuery } from "./bigquery-parsers";
 import { upsertUsersFromBigQuery, upsertStoresFromBigQuery, upsertZones, upsertOrders } from "./upsert";
 import type { SyncStepReport, SyncSummary } from "./run-sync";
-import { createServiceRoleClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 
 const BIGQUERY_TABLE = "ext_bodega_aurrera";
 
 async function logStep(sourceSheet: string, startedAt: string, result: { read: number; inserted: number; updated: number; errors: number; errorDetail?: unknown }) {
-  const supabase = createServiceRoleClient();
-  await supabase.from("sync_logs").insert({
-    source_sheet: sourceSheet,
-    started_at: startedAt,
-    finished_at: new Date().toISOString(),
-    status: result.errors > 0 ? "FAILED" : "SUCCESS",
-    records_read: result.read,
-    records_inserted: result.inserted,
-    records_updated: result.updated,
-    errors_count: result.errors,
-    error_detail: result.errorDetail ?? null,
+  await db.syncLog.create({
+    data: {
+      source_sheet: sourceSheet,
+      started_at: new Date(startedAt),
+      finished_at: new Date(),
+      status: result.errors > 0 ? "FAILED" : "SUCCESS",
+      records_read: result.read,
+      records_inserted: result.inserted,
+      records_updated: result.updated,
+      errors_count: result.errors,
+      error_detail: result.errorDetail != null ? JSON.stringify(result.errorDetail) : null,
+    },
   });
 }
 

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import { BONUSES } from "./mock-dataset";
 
@@ -60,42 +60,36 @@ export async function getBonuses(params: {
     return { rows: rows.slice(start, start + pageSize), total, totalAmount, page, pageSize };
   }
 
-  const supabase = await createClient();
-  let query = supabase
-    .from("bonuses")
-    .select(
-      "id, bonus_date, area, typo, amount, payment_checked, users(full_name, phone), stores(name)",
-      { count: "exact" }
-    )
-    .order("bonus_date", { ascending: false })
-    .range((page - 1) * pageSize, page * pageSize - 1);
+  const where = params.q ? { typo: { contains: params.q } } : undefined;
 
-  if (params.q) {
-    query = query.or(`typo.ilike.%${params.q}%`);
-  }
+  const [data, count, totalAgg] = await Promise.all([
+    db.bonus.findMany({
+      where,
+      include: { user: true, store: true },
+      orderBy: { bonus_date: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.bonus.count({ where }),
+    db.bonus.aggregate({ where, _sum: { amount: true } }),
+  ]);
 
-  const { data, count } = await query;
-
-  const rows: BonusRow[] = (data ?? []).map((b) => {
-    const user = Array.isArray(b.users) ? b.users[0] : b.users;
-    const store = Array.isArray(b.stores) ? b.stores[0] : b.stores;
-    return {
-      id: b.id,
-      date: b.bonus_date,
-      userName: user?.full_name ?? "—",
-      userPhone: user?.phone ?? "—",
-      storeName: store?.name ?? "—",
-      area: b.area ?? "—",
-      typo: b.typo,
-      amount: b.amount,
-      paymentChecked: b.payment_checked,
-    };
-  });
+  const rows: BonusRow[] = data.map((b) => ({
+    id: b.id,
+    date: b.bonus_date.toISOString(),
+    userName: b.user?.full_name ?? "—",
+    userPhone: b.user?.phone ?? "—",
+    storeName: b.store?.name ?? "—",
+    area: b.area ?? "—",
+    typo: b.typo,
+    amount: Number(b.amount),
+    paymentChecked: b.payment_checked,
+  }));
 
   return {
     rows,
-    total: count ?? 0,
-    totalAmount: rows.reduce((s, r) => s + r.amount, 0),
+    total: count,
+    totalAmount: Number(totalAgg._sum.amount ?? 0),
     page,
     pageSize,
   };

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import { ORDERS, type MockOrder } from "./mock-dataset";
 
@@ -113,6 +113,30 @@ function applyFilters(rows: MockOrder[], filters: AnalyticsFilters): MockOrder[]
   return out;
 }
 
+// Shared live-mode order fetch — bounded by date range + optional
+// store/status filters (zone/state require the store relation, applied
+// in-memory below since they're not indexed columns on `orders`).
+async function fetchLiveOrders(filters: AnalyticsFilters) {
+  const since = new Date();
+  since.setDate(since.getDate() - (filters.days ?? 30));
+
+  const rows = await db.order.findMany({
+    where: {
+      delivery_date: { gte: since },
+      store_id: filters.storeId || undefined,
+      status: filters.status || undefined,
+    },
+    include: { store: { include: { zone: true } }, user: true },
+  });
+
+  if (!filters.zone && !filters.state) return rows;
+  return rows.filter(
+    (o) =>
+      (!filters.zone || o.store?.zone?.name === filters.zone) &&
+      (!filters.state || o.store?.state === filters.state)
+  );
+}
+
 export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<AnalyticsOverview> {
   const granularity = filters.granularity ?? "day";
 
@@ -177,27 +201,15 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
     };
   }
 
-  // Live mode: aggregated client-side from raw rows for now — see
+  // Live mode: aggregated in application code for now — see
   // src/lib/data/overview.ts for the same tradeoff note. Once volume is
-  // known this should move to a Postgres view/RPC with date_trunc().
-  const supabase = await createClient();
-  const since = new Date();
-  since.setDate(since.getDate() - (filters.days ?? 30));
-
-  let query = supabase
-    .from("orders")
-    .select("id, status, on_time, is_late, delivery_date, user_id, store_id, distance_km")
-    .gte("delivery_date", since.toISOString());
-  if (filters.storeId) query = query.eq("store_id", filters.storeId);
-  if (filters.status) query = query.eq("status", filters.status);
-
-  const { data } = await query;
-  const rows = data ?? [];
+  // known this should move to a SQL Server view/stored proc.
+  const rows = await fetchLiveOrders(filters);
 
   const buckets = new Map<string, TrendPoint>();
   for (const o of rows) {
     if (!o.delivery_date) continue;
-    const { key, label } = bucketOf(new Date(o.delivery_date), granularity);
+    const { key, label } = bucketOf(o.delivery_date, granularity);
     const point = buckets.get(key) ?? { bucket: key, label, total: 0, onTime: 0, late: 0, cancelled: 0 };
     point.total++;
     if (o.on_time) point.onTime++;
@@ -213,6 +225,31 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
     .map(([status, count]) => ({ status: STATUS_LABELS[status] ?? status, code: status, count, pct: rows.length ? count / rows.length : 0 }))
     .sort((a, b) => b.count - a.count);
 
+  const zoneMap = new Map<string, { count: number; onTime: number }>();
+  const stateMap = new Map<string, { count: number; onTime: number }>();
+  for (const o of rows) {
+    const zoneName = o.store?.zone?.name;
+    if (zoneName) {
+      const z = zoneMap.get(zoneName) ?? { count: 0, onTime: 0 };
+      z.count++;
+      if (o.on_time) z.onTime++;
+      zoneMap.set(zoneName, z);
+    }
+    const stateName = o.store?.state;
+    if (stateName) {
+      const s = stateMap.get(stateName) ?? { count: 0, onTime: 0 };
+      s.count++;
+      if (o.on_time) s.onTime++;
+      stateMap.set(stateName, s);
+    }
+  }
+  const zoneBreakdown: ZoneBreakdownItem[] = Array.from(zoneMap.entries())
+    .map(([zone, v]) => ({ zone, count: v.count, onTimePct: v.count ? v.onTime / v.count : 0 }))
+    .sort((a, b) => b.count - a.count);
+  const stateBreakdown: StatePerformanceItem[] = Array.from(stateMap.entries())
+    .map(([state, v]) => ({ state, count: v.count, onTimePct: v.count ? v.onTime / v.count : 0 }))
+    .sort((a, b) => b.count - a.count);
+
   const delivered = rows.filter((o) => o.status === "DELIVERED");
 
   return {
@@ -225,8 +262,8 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
     activeStores: new Set(rows.map((o) => o.store_id).filter(Boolean)).size,
     trend,
     statusBreakdown,
-    zoneBreakdown: [],
-    stateBreakdown: [],
+    zoneBreakdown,
+    stateBreakdown,
   };
 }
 
@@ -254,22 +291,14 @@ export async function getStorePerformance(filters: AnalyticsFilters): Promise<St
       .sort((a, b) => b.count - a.count);
   }
 
-  const supabase = await createClient();
-  const since = new Date();
-  since.setDate(since.getDate() - (filters.days ?? 30));
-  const { data } = await supabase
-    .from("orders")
-    .select("store_id, on_time, is_late, stores(name, zone_id)")
-    .gte("delivery_date", since.toISOString());
-
+  const rows = await fetchLiveOrders(filters);
   const map = new Map<string, StorePerformanceItem & { onTime: number }>();
-  for (const o of data ?? []) {
+  for (const o of rows) {
     if (!o.store_id) continue;
-    const store = Array.isArray(o.stores) ? o.stores[0] : o.stores;
     const existing = map.get(o.store_id) ?? {
       storeId: o.store_id,
-      storeName: store?.name ?? "—",
-      zone: "—",
+      storeName: o.store?.name ?? "—",
+      zone: o.store?.zone?.name ?? "—",
       count: 0,
       onTime: 0,
       onTimePct: 0,
@@ -313,24 +342,15 @@ export async function getUserPerformance(filters: AnalyticsFilters): Promise<Use
       .sort((a, b) => b.count - a.count);
   }
 
-  const supabase = await createClient();
-  const since = new Date();
-  since.setDate(since.getDate() - (filters.days ?? 30));
-  const { data } = await supabase
-    .from("orders")
-    .select("user_id, on_time, is_late, distance_km, users(full_name, phone), stores(name)")
-    .gte("delivery_date", since.toISOString());
-
+  const rows = await fetchLiveOrders(filters);
   const map = new Map<string, UserPerformanceItem & { onTime: number; distanceSum: number }>();
-  for (const o of data ?? []) {
+  for (const o of rows) {
     if (!o.user_id) continue;
-    const user = Array.isArray(o.users) ? o.users[0] : o.users;
-    const store = Array.isArray(o.stores) ? o.stores[0] : o.stores;
     const existing = map.get(o.user_id) ?? {
       userId: o.user_id,
-      userName: user?.full_name ?? "—",
-      phone: user?.phone ?? "—",
-      storeName: store?.name ?? "—",
+      userName: o.user?.full_name ?? "—",
+      phone: o.user?.phone ?? "—",
+      storeName: o.store?.name ?? "—",
       count: 0,
       onTime: 0,
       onTimePct: 0,
@@ -341,7 +361,7 @@ export async function getUserPerformance(filters: AnalyticsFilters): Promise<Use
     existing.count++;
     if (o.on_time) existing.onTime++;
     if (o.is_late) existing.lateCount++;
-    existing.distanceSum += o.distance_km ?? 0;
+    existing.distanceSum += Number(o.distance_km ?? 0);
     map.set(o.user_id, existing);
   }
   return Array.from(map.values())

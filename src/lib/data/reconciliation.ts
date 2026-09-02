@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import { TRANSACTIONS } from "./mock-dataset";
 import type { ReconciliationStatus } from "@/types/database";
@@ -96,38 +96,45 @@ export async function getReconciliation(params: {
     return { rows: rows.slice(start, start + pageSize), total, page, pageSize, counts };
   }
 
-  // Live mode: reconciliation is a materialized comparison best computed in
-  // Postgres (see 0002_views.sql) once real submission/payment data exists.
-  const supabase = await createClient();
-  let query = supabase
-    .from("reconciliation")
-    .select("*", { count: "exact" })
-    .order("computed_at", { ascending: false })
-    .range((page - 1) * pageSize, page * pageSize - 1);
+  // Live mode: reconciliation is a materialized comparison best computed
+  // in a SQL Server view once real submission/payment data exists.
+  const [rowsData, total, countRows] = await Promise.all([
+    db.reconciliation.findMany({
+      where: params.status ? { status: params.status } : undefined,
+      include: { user: true, store: true, order: true },
+      orderBy: { computed_at: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.reconciliation.count({ where: params.status ? { status: params.status } : undefined }),
+    db.reconciliation.groupBy({ by: ["status"], _count: { _all: true } }),
+  ]);
 
-  if (params.status) query = query.eq("status", params.status);
-  const { data, count } = await query;
-
-  const rows: ReconciliationRowView[] = (data ?? []).map((r) => ({
+  const rows: ReconciliationRowView[] = rowsData.map((r) => ({
     id: r.id,
-    userName: r.user_id,
-    storeName: r.store_id,
-    orderRef: r.order_id ?? "—",
-    date: r.computed_at,
-    generated: r.generated_amount,
-    submitted: r.submitted_amount,
-    paid: r.paid_amount,
-    difference: r.difference,
-    status: r.status,
+    userName: r.user?.full_name ?? "—",
+    storeName: r.store?.name ?? "—",
+    orderRef: r.order?.order_id ?? "—",
+    date: r.computed_at.toISOString(),
+    generated: Number(r.generated_amount),
+    submitted: Number(r.submitted_amount),
+    paid: Number(r.paid_amount),
+    difference: Number(r.submitted_amount) - Number(r.paid_amount),
+    status: r.status as ReconciliationStatus,
   }));
 
-  return {
-    rows,
-    total: count ?? 0,
-    page,
-    pageSize,
-    counts: { CONCILIADO: 0, PENDIENTE: 0, DIFERENCIA: 0, DUPLICADO: 0, SIN_MATCH: 0 },
+  const counts: Record<ReconciliationStatus, number> = {
+    CONCILIADO: 0,
+    PENDIENTE: 0,
+    DIFERENCIA: 0,
+    DUPLICADO: 0,
+    SIN_MATCH: 0,
   };
+  for (const c of countRows) {
+    counts[c.status as ReconciliationStatus] = c._count._all;
+  }
+
+  return { rows, total, page, pageSize, counts };
 }
 
 function countByStatus(rows: ReconciliationRowView[]): Record<ReconciliationStatus, number> {

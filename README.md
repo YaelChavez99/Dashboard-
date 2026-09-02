@@ -15,8 +15,8 @@ combinables y clic sobre cualquier desglose para hacer zoom directo al
 detalle.
 
 Ver `docs/data-audit.md` para la auditoría completa de las hojas reales
-que sustentan el esquema (`supabase/migrations/0001_init.sql`), y
-`docs/database-schema.md` para el resumen pensado para TechOps.
+que sustentan el esquema, y `docs/database-schema.md` para el resumen
+pensado para TechOps (base de datos + login).
 
 ## Visión del Hub
 
@@ -45,7 +45,8 @@ ver Roadmap al final.
 Construido en el orden recomendado para validar el modelo financiero antes
 de expandir a más módulos y más marcas:
 
-- ✅ Login (Supabase Auth) + roles (ADMIN / FINANCE / OPERATIONS / VIEWER)
+- ✅ Login con Google Workspace (`@zubale.com`, vía NextAuth) + roles
+  (ADMIN / FINANCE / OPERATIONS / VIEWER)
 - ✅ Overview — KPIs, Financial Flow (funnel), Financial Trend, alertas
 - ✅ Finanzas (`/finance`) — revenue y margen por tienda, día/semana/mes
 - ✅ Pagos — historial con filtros, búsqueda, export CSV, paginación
@@ -55,8 +56,8 @@ de expandir a más módulos y más marcas:
   datos", carga manual de CSV y bitácora (`sync_logs`)
 - ✅ Bonos — hoja Bonos-Supply (confirmada por el usuario en
   `gid=2132023001` del mismo spreadsheet), tabla + KPIs
-- ✅ Sync operativo BigQuery (`ext_bodega_aurrera`) → Supabase — deriva
-  usuarios/tiendas y hace upsert de órdenes. El sync financiero vía
+- ✅ Sync operativo BigQuery (`ext_bodega_aurrera`) → base de datos —
+  deriva usuarios/tiendas y hace upsert de órdenes. El sync financiero vía
   Google Sheets (`src/lib/sync/`) sigue disponible en el código pero
   pausado — ver "Fuente operativa actual" abajo.
 - ✅ Analytics (`/analytics`) — dashboard ejecutivo operativo, muy
@@ -72,25 +73,27 @@ de expandir a más módulos y más marcas:
 - 🚧 Tiendas, Zonas, Calidad de Datos, Reportes — pantallas
   "Próximamente"; siguiente fase una vez validado lo anterior.
 
-**No hay un proyecto Supabase conectado todavía.** La app corre en **modo
-demo**: cuando `NEXT_PUBLIC_SUPABASE_URL` no está configurada (o es el
-placeholder de `.env.example`), toda la capa de datos (`src/lib/data/*`)
-sirve un dataset sembrado con la misma forma del esquema real, generado a
-partir de los nombres de tienda/zona/modelo encontrados en la auditoría.
-Esto incluye un bypass de autenticación (usuario `ADMIN` fijo) para poder
-navegar la app sin credenciales reales. En cuanto se configuran las env
-vars de Supabase, ambos bypasses se desactivan solos.
+**No hay una base de datos conectada todavía.** La app corre en **modo
+demo**: cuando `DATABASE_URL` no está configurada (o es el placeholder de
+`.env.example`), toda la capa de datos (`src/lib/data/*`) sirve un
+dataset sembrado con la misma forma del esquema real, generado a partir
+de los nombres de tienda/zona/modelo encontrados en la auditoría. Esto
+incluye un bypass de autenticación (usuario `ADMIN` fijo) para poder
+navegar la app sin credenciales reales. En cuanto se configura
+`DATABASE_URL`, ambos bypasses se desactivan solos.
 
 ## Arquitectura
 
 ```
-Google Forms ──▶ Google Sheets ──sync/ETL──▶ Supabase (Postgres + Auth + RLS)
-BigQuery (ext_bodega_aurrera) ──sync──────────────────▶      │
-                                                              ▼
+Google Forms ──▶ Google Sheets ──sync/ETL──▶ Cloud SQL for SQL Server
+BigQuery (ext_bodega_aurrera) ──sync──────────────▶      │  (Prisma ORM)
+                                                           ▼
                                           Next.js (App Router) + Tailwind
                                           shadcn/ui-style components + Recharts
-                                                              │
-                                                              ▼
+                                                           │
+                                          NextAuth (Google Workspace) ──┘
+                                                           │
+                                                           ▼
                                           Google Cloud Run (Zubale infra)
 ```
 
@@ -100,21 +103,27 @@ BigQuery (ext_bodega_aurrera) ──sync─────────────�
   no es alcanzable desde este entorno de build, así que los componentes
   base se generaron manualmente siguiendo el mismo patrón/API.
 - **Charts**: Recharts (`src/components/dashboard/*-chart.tsx`).
-- **Backend/DB**: Supabase — Postgres + Auth + Row Level Security (ver
-  `docs/database-schema.md` sobre la dependencia de Supabase Auth al
-  migrar el hosting fuera de Supabase/Vercel).
+- **Backend/DB**: Cloud SQL for SQL Server vía Prisma ORM
+  (`prisma/schema.prisma`) — sin RLS a nivel de base de datos; la
+  autorización por rol/tienda/zona se aplica en la capa de aplicación.
+  Ver `docs/database-schema.md`.
+- **Auth**: NextAuth (Auth.js) con Google OAuth, restringido al dominio
+  `zubale.com` (`src/lib/auth.ts` / `src/lib/auth.config.ts` — dividido
+  en dos archivos porque el middleware corre en el runtime Edge, que no
+  soporta Prisma).
 - **Deploy**: Google Cloud Run dentro de la infraestructura de Zubale —
   ver `Procfile` y `cloudbuild.yaml`.
 - **Data access**: cada dominio (`overview`, `finance`, `analytics`,
   `payments`, `users`, `reconciliation`) tiene un único módulo en
-  `src/lib/data/` que decide entre el dataset demo y una consulta real a
-  Supabase (`isDemoMode()`).
+  `src/lib/data/` que decide entre el dataset demo y una consulta real
+  (`isDemoMode()`).
 
 ## Setup local
 
 ```bash
 npm install
-cp .env.example .env.local   # completa las credenciales de Supabase cuando existan
+cp .env.example .env.local   # completa las credenciales cuando existan
+npx prisma generate           # genera el cliente de Prisma
 npm run dev
 ```
 
@@ -122,8 +131,9 @@ Sin completar `.env.local`, la app funciona igual en modo demo (ver arriba).
 
 ### Variables de entorno
 
-Ver `.env.example`. `SUPABASE_SERVICE_ROLE_KEY` es server-only — nunca se
-expone al cliente ni se usa fuera de `src/lib/supabase/server.ts`.
+Ver `.env.example`. `DATABASE_URL` y los secrets de Google (`AUTH_*`,
+`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`) son server-only — nunca se exponen
+al cliente.
 
 ### Antes del primer sync real (Google Sheets)
 
@@ -183,7 +193,7 @@ mano en lugar de que el server lo consulte directo.
 
 ## Esquema de base de datos
 
-`supabase/migrations/0001_init.sql`:
+`prisma/schema.prisma` (Cloud SQL for SQL Server, vía Prisma ORM):
 
 | Tabla | Origen (hoja real) |
 |---|---|
@@ -195,14 +205,15 @@ mano en lugar de que el server lo consulte directo.
 | `reconciliation` | derivada — Generado vs Enviado vs Pagado |
 | `profiles`, `sync_logs`, `audit_logs` | solo-app, no vienen de Sheets |
 
-`0002_views.sql` agrega `v_payment_ledger`, la vista aplanada que alimenta
-`/payments` y el export CSV. Ver `docs/database-schema.md` para el
-detalle completo pensado para TechOps, incluida la dependencia de
-Supabase Auth.
+El ledger aplanado que alimenta `/payments` y el export CSV (antes una
+vista de Postgres) ahora se arma en código — ver
+`src/lib/data/payments.ts`. Ver `docs/database-schema.md` para el detalle
+completo pensado para TechOps, incluido cómo se provisiona la base y el
+OAuth Client de Google.
 
-RLS está activo en todas las tablas: lectura para cualquier usuario
-autenticado, escritura reservada a rutas server-side con la service role
-key (el sync job) y a los roles ADMIN/FINANCE donde aplica.
+Sin RLS a nivel de base de datos: la autorización (por rol, por
+tienda/zona) se aplica 100% en la capa de aplicación
+(`src/lib/data/*.ts` + rutas API), nunca en el cliente.
 
 ## Flujo financiero (regla central)
 
@@ -222,12 +233,12 @@ una fila real en `payments`.
    marcas en los mismos dashboards.
 2. **Cortes por ciudad y por slot** en Analytics, como desgloses propios
    (hoy solo viven como dato dentro del detalle de cada orden).
-3. Decidir el destino final de la base de datos/auth (Supabase
-   self-hosted vs. otro proveedor) — ver `docs/database-schema.md`.
+3. TechOps provisiona Cloud SQL for SQL Server y el OAuth Client de
+   Google Workspace — ver `docs/database-schema.md`.
 4. Correr el primer sync real, confirmar `TAB.paymentValidation` y
    `TAB.bonosSupply` contra la barra de pestañas, y validar conteo de
-   registros Sheets vs Supabase por hoja (sección 42 del brief original —
-   conciliación de migración).
+   registros Sheets vs base de datos por hoja (sección 42 del brief
+   original — conciliación de migración).
 5. Confirmar la fuente de `Master Data BA` (no se encontró en el archivo
    auditado — ver `docs/data-audit.md`).
 6. Tiendas, Zonas, Calidad de Datos, Reportes (audit log UI, system

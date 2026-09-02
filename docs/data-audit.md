@@ -130,6 +130,6 @@ otro archivo de Google Sheets o si el nombre cambió.
 4. Sin `Bonos-Supply` auditada, no se creó tabla de bonos — evitando
    inventar columnas.
 
-Ver `supabase/migrations/0001_init.sql` para el esquema derivado de esta
-auditoría, y `supabase/migrations/0002_views.sql` para la vista
-`v_payment_ledger` que alimenta `/payments`.
+Ver `prisma/schema.prisma` para el esquema actual (Cloud SQL for SQL
+Server) derivado de esta auditoría — el diseño original en Postgres
+(`supabase/migrations/`) queda como referencia histórica, ya retirado.

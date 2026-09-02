@@ -1,4 +1,4 @@
-import { createServiceRoleClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { getSheetValues } from "@/lib/google/sheets-client";
 import { RANGES } from "./config";
 import {
@@ -41,17 +41,18 @@ export interface SyncSummary {
 }
 
 async function logStep(sourceSheet: string, startedAt: string, result: StepResult) {
-  const supabase = createServiceRoleClient();
-  await supabase.from("sync_logs").insert({
-    source_sheet: sourceSheet,
-    started_at: startedAt,
-    finished_at: new Date().toISOString(),
-    status: result.errors > 0 ? "FAILED" : "SUCCESS",
-    records_read: result.read,
-    records_inserted: result.inserted,
-    records_updated: result.updated,
-    errors_count: result.errors,
-    error_detail: result.errorDetail ?? null,
+  await db.syncLog.create({
+    data: {
+      source_sheet: sourceSheet,
+      started_at: new Date(startedAt),
+      finished_at: new Date(),
+      status: result.errors > 0 ? "FAILED" : "SUCCESS",
+      records_read: result.read,
+      records_inserted: result.inserted,
+      records_updated: result.updated,
+      errors_count: result.errors,
+      error_detail: result.errorDetail != null ? JSON.stringify(result.errorDetail) : null,
+    },
   });
 }
 
@@ -141,9 +142,8 @@ export async function runSync(): Promise<SyncSummary> {
   );
 
   // order_id -> internal uuid, needed to link finance_submissions back to orders
-  const supabase = createServiceRoleClient();
-  const { data: orderRows } = await supabase.from("orders").select("id, order_id");
-  const orderIdByOrderId = new Map<string, string>((orderRows ?? []).map((o) => [o.order_id, o.id]));
+  const orderRows = await db.order.findMany({ select: { id: true, order_id: true } });
+  const orderIdByOrderId = new Map<string, string>(orderRows.map((o) => [o.order_id, o.id]));
 
   const masterPagosRows = await getSheetValues(RANGES.masterPagos);
   const parsedSubmissions = parseMasterPagos(masterPagosRows);

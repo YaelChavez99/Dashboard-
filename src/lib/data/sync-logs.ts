@@ -1,16 +1,30 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import type { SyncLog } from "@/types/database";
 
 export async function getRecentSyncLogs(limit = 20): Promise<SyncLog[]> {
   if (isDemoMode()) return [];
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("sync_logs")
-    .select("id, source_sheet, started_at, finished_at, status, records_read, records_inserted, records_updated, errors_count")
-    .order("started_at", { ascending: false })
-    .limit(limit);
+  const logs = await db.syncLog.findMany({
+    select: {
+      id: true,
+      source_sheet: true,
+      started_at: true,
+      finished_at: true,
+      status: true,
+      records_read: true,
+      records_inserted: true,
+      records_updated: true,
+      errors_count: true,
+    },
+    orderBy: { started_at: "desc" },
+    take: limit,
+  });
 
-  return data ?? [];
+  return logs.map((l) => ({
+    ...l,
+    started_at: l.started_at.toISOString(),
+    finished_at: l.finished_at?.toISOString() ?? null,
+    status: l.status as SyncLog["status"],
+  }));
 }

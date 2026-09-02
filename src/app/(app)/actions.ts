@@ -2,13 +2,12 @@
 
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
+import { signOut } from "@/lib/auth";
 import { isDemoMode } from "@/lib/data/demo-mode";
 
 export async function signOutAction() {
   if (!isDemoMode()) {
-    const supabase = await createClient();
-    await supabase.auth.signOut();
+    await signOut({ redirect: false });
   }
   redirect("/login");
 }

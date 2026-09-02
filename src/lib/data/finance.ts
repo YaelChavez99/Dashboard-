@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
 import { TRANSACTIONS } from "./mock-dataset";
 
@@ -123,28 +123,24 @@ export async function getFinanceOverview(filters: FinanceFilters): Promise<Finan
     };
   }
 
-  const supabase = await createClient();
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("generated_amount, delivery_date, store_id, stores(id, name, state, store_ext_id)")
-    .gte("delivery_date", since.toISOString())
-    .not("generated_amount", "is", null);
-
-  const rows = (data ?? []).filter((r) => r.generated_amount != null && r.delivery_date);
+  const rows = await db.order.findMany({
+    where: { delivery_date: { gte: since }, generated_amount: { not: null } },
+    include: { store: true },
+  });
 
   const buckets = new Map<string, FinanceTrendPoint>();
   const byStore = new Map<string, StoreFinanceItem>();
 
   for (const r of rows) {
-    const store = Array.isArray(r.stores) ? r.stores[0] : r.stores;
-    const rate = marginRateForStore(store?.store_ext_id ?? "0");
-    const revenue = r.generated_amount ?? 0;
+    if (!r.delivery_date || r.generated_amount == null) continue;
+    const rate = marginRateForStore(r.store?.store_ext_id ?? "0");
+    const revenue = Number(r.generated_amount);
     const margin = revenue * rate;
 
-    const { key, label } = bucketOf(new Date(r.delivery_date!), granularity);
+    const { key, label } = bucketOf(r.delivery_date, granularity);
     const point = buckets.get(key) ?? { bucket: key, label, revenue: 0, margin: 0 };
     point.revenue += revenue;
     point.margin += margin;
@@ -153,8 +149,8 @@ export async function getFinanceOverview(filters: FinanceFilters): Promise<Finan
     if (r.store_id) {
       const existing = byStore.get(r.store_id) ?? {
         storeId: r.store_id,
-        storeName: store?.name ?? "—",
-        state: store?.state ?? "",
+        storeName: r.store?.name ?? "—",
+        state: r.store?.state ?? "",
         orders: 0,
         revenue: 0,
         margin: 0,
@@ -168,7 +164,7 @@ export async function getFinanceOverview(filters: FinanceFilters): Promise<Finan
   }
 
   const trend = Array.from(buckets.values()).sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
-  const totalRevenue = rows.reduce((s, r) => s + (r.generated_amount ?? 0), 0);
+  const totalRevenue = trend.reduce((s, t) => s + t.revenue, 0);
   const totalMargin = trend.reduce((s, t) => s + t.margin, 0);
 
   return {
