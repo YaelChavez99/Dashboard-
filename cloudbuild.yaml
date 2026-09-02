@@ -17,16 +17,18 @@ steps:
       # Node >=20.9; Node 20 LTS reached end-of-life Apr 2026, so 22.x is
       # the lowest LTS line still expected in the current builder image.
       - '--set-build-env-vars=GOOGLE_NODEJS_VERSION=22.x.x'
+      # No Supabase credentials on purpose — this POC deploys 100%
+      # disconnected from Supabase/Vercel and runs in the app's built-in
+      # demo mode (seeded example data, no real login) until the team
+      # decides the real database/auth path (see docs/database-schema.md).
       # Public (non-secret) config hardcoded directly; secrets passed as
       # Cloud Build substitutions (TechOps fills these in on the Trigger,
       # never hardcoded here). REPLACE_ME values are ones this session
       # never had — fill in before the first real deploy.
-      - '--set-env-vars=NEXT_PUBLIC_SUPABASE_URL=https://evsncbaeoxhojwytzdtx.supabase.co,GOOGLE_SERVICE_ACCOUNT_EMAIL=REPLACE_ME,GOOGLE_SHEETS_SPREADSHEET_ID=1dOfBB8gcZsBR-GTPkYQcOdTbpbXH0MQk0FHuri6uRqY,BIGQUERY_PROJECT_ID=zb-data-bu-mexico-dev,BIGQUERY_DATASET=1_raw_ext_gsheet,NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY},SUPABASE_SERVICE_ROLE_KEY=${_SUPABASE_SERVICE_ROLE_KEY},GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=${_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY}'
+      - '--set-env-vars=GOOGLE_SERVICE_ACCOUNT_EMAIL=REPLACE_ME,GOOGLE_SHEETS_SPREADSHEET_ID=1dOfBB8gcZsBR-GTPkYQcOdTbpbXH0MQk0FHuri6uRqY,BIGQUERY_PROJECT_ID=zb-data-bu-mexico-dev,BIGQUERY_DATASET=1_raw_ext_gsheet,GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=${_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY}'
 options:
   logging: CLOUD_LOGGING_ONLY
 substitutions:
   _SERVICE_NAME: 'finance-ops-poc'
   # List ONLY sensitive secrets here for TechOps to fill in the trigger
-  _SUPABASE_ANON_KEY: ''
-  _SUPABASE_SERVICE_ROLE_KEY: ''
   _GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ''
