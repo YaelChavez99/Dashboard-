@@ -1,39 +1,74 @@
 # Finance & Operations Control
 
-Centro de control financiero y operativo. Reemplaza el flujo de "abrir el
-Google Sheets" con una aplicación web con login, roles y un dashboard
-ejecutivo — Google Sheets/Forms quedan como **fuente de datos**, sincronizada
-hacia una base de datos propia (Supabase/Postgres), nunca como la interfaz.
+Hub centralizado de operación y finanzas para managers y directivos.
+Reemplaza el flujo de "abrir el Google Sheets" con una aplicación web con
+login, roles, un dashboard ejecutivo y una **Biblioteca** que centraliza
+las herramientas del equipo en un solo lugar. Google Sheets/Forms y
+BigQuery quedan como **fuente de datos**, sincronizada hacia una base de
+datos propia, nunca como la interfaz.
 
-Ver `docs/data-audit.md` para la auditoría completa de las hojas reales que
-sustentan el esquema (`supabase/migrations/0001_init.sql`).
+La meta: un solo lugar donde ver, en vivo y en histórico, la operación y
+los pagos de **Bodega Aurrera** (ya construido) y, en roadmap, de
+**Walmart** y **Sam's** — con métricas cruzadas por día/semana/mes,
+estado, ciudad, tienda, usuario y slot, totalmente interactivo: filtros
+combinables y clic sobre cualquier desglose para hacer zoom directo al
+detalle.
+
+Ver `docs/data-audit.md` para la auditoría completa de las hojas reales
+que sustentan el esquema (`supabase/migrations/0001_init.sql`), y
+`docs/database-schema.md` para el resumen pensado para TechOps.
+
+## Visión del Hub
+
+| Marca | Operación | Estado |
+|---|---|---|
+| Bodega Aurrera | Órdenes, performance por tienda/usuario/zona/estado, revenue y margen por tienda | ✅ construido |
+| Walmart | — | 🚧 roadmap, pendiente conectar fuente de datos |
+| Sam's | — | 🚧 roadmap, pendiente conectar fuente de datos |
+
+Cortes que el hub debe soportar, para cualquier marca conectada:
+
+- Por periodo: día / semana / mes
+- Por estado (geográfico) y por ciudad
+- Por tienda
+- Por usuario / shopper
+- Por slot de entrega
+
+Hoy Analytics ya soporta filtros combinables por tienda, estado, zona y
+estatus, con clic en cualquier desglose (zona / estado / estatus) para
+saltar directo al detalle filtrado. **Ciudad** y **slot** como cortes
+propios (no solo como dato dentro del detalle) son el siguiente paso —
+ver Roadmap al final.
 
 ## Estado actual
 
 Construido en el orden recomendado para validar el modelo financiero antes
-de expandir a más módulos:
+de expandir a más módulos y más marcas:
 
 - ✅ Login (Supabase Auth) + roles (ADMIN / FINANCE / OPERATIONS / VIEWER)
 - ✅ Overview — KPIs, Financial Flow (funnel), Financial Trend, alertas
+- ✅ Finanzas (`/finance`) — revenue y margen por tienda, día/semana/mes
 - ✅ Pagos — historial con filtros, búsqueda, export CSV, paginación
 - ✅ Perfil de usuario — totales, historial, Cumulative Payments
 - ✅ Conciliación — Generado vs Master Pagos vs Pagado, con estados
 - ✅ Admin → Sincronización — panel con último estado, botón "Sincronizar
-  datos" y bitácora (`sync_logs`)
+  datos", carga manual de CSV y bitácora (`sync_logs`)
 - ✅ Bonos — hoja Bonos-Supply (confirmada por el usuario en
   `gid=2132023001` del mismo spreadsheet), tabla + KPIs
-- ✅ Sync job Google Sheets → Supabase (`src/lib/sync/`) — lee Usuarios,
-  Configuración de Tiendas, Tarifa_Piano, Data BA, Reporte de Pagos BA-MX,
-  Aclaración de Pagos, Payment Validation (PAGADO) y Bonos-Supply vía la
-  API de Google Sheets (service account), resuelve FKs por llave natural
-  (phone/store_ext_id/order_id) y escribe cada paso a `sync_logs`.
-  El proyecto Supabase de producción ya está conectado (Vercel), pero el
-  service account de Google todavía no — ver "Antes del primer sync real"
-  abajo.
-- ✅ Analytics — dashboard ejecutivo operativo: tendencias de volumen de
-  órdenes y on-time % (día/semana/mes), desglose por estado operativo,
-  zona y estado geográfico, ranking de tiendas y usuarios por
-  performance. Basado en `orders` (Data BA).
+- ✅ Sync operativo BigQuery (`ext_bodega_aurrera`) → Supabase — deriva
+  usuarios/tiendas y hace upsert de órdenes. El sync financiero vía
+  Google Sheets (`src/lib/sync/`) sigue disponible en el código pero
+  pausado — ver "Fuente operativa actual" abajo.
+- ✅ Analytics (`/analytics`) — dashboard ejecutivo operativo, muy
+  interactivo: tendencias de volumen y on-time % (día/semana/mes),
+  filtros combinables por tienda/estado/zona/estatus, desglose clicable
+  (zoom directo al detalle filtrado), ranking de tiendas y usuarios por
+  performance.
+- ✅ Biblioteca (`/library`) — centraliza dashboards, fuentes de datos
+  (Google Sheet auditado, consola de BigQuery) y el repositorio, para que
+  el equipo tenga visibilidad de todas las herramientas en un solo lugar.
+- 🚧 Walmart y Sam's — misma operación, pendiente conectar fuente de datos.
+- 🚧 Cortes dedicados por ciudad y por slot en Analytics.
 - 🚧 Tiendas, Zonas, Calidad de Datos, Reportes — pantallas
   "Próximamente"; siguiente fase una vez validado lo anterior.
 
@@ -50,13 +85,13 @@ vars de Supabase, ambos bypasses se desactivan solos.
 
 ```
 Google Forms ──▶ Google Sheets ──sync/ETL──▶ Supabase (Postgres + Auth + RLS)
-                                                        │
-                                                        ▼
+BigQuery (ext_bodega_aurrera) ──sync──────────────────▶      │
+                                                              ▼
                                           Next.js (App Router) + Tailwind
                                           shadcn/ui-style components + Recharts
-                                                        │
-                                                        ▼
-                                              URL compartida (Vercel)
+                                                              │
+                                                              ▼
+                                          Google Cloud Run (Zubale infra)
 ```
 
 - **Frontend**: Next.js 16 (App Router) + TypeScript + Tailwind v4.
@@ -65,10 +100,15 @@ Google Forms ──▶ Google Sheets ──sync/ETL──▶ Supabase (Postgres 
   no es alcanzable desde este entorno de build, así que los componentes
   base se generaron manualmente siguiendo el mismo patrón/API.
 - **Charts**: Recharts (`src/components/dashboard/*-chart.tsx`).
-- **Backend/DB**: Supabase — Postgres + Auth + Row Level Security.
-- **Data access**: cada dominio (`overview`, `payments`, `users`,
-  `reconciliation`) tiene un único módulo en `src/lib/data/` que decide
-  entre el dataset demo y una consulta real a Supabase (`isDemoMode()`).
+- **Backend/DB**: Supabase — Postgres + Auth + Row Level Security (ver
+  `docs/database-schema.md` sobre la dependencia de Supabase Auth al
+  migrar el hosting fuera de Supabase/Vercel).
+- **Deploy**: Google Cloud Run dentro de la infraestructura de Zubale —
+  ver `Procfile` y `cloudbuild.yaml`.
+- **Data access**: cada dominio (`overview`, `finance`, `analytics`,
+  `payments`, `users`, `reconciliation`) tiene un único módulo en
+  `src/lib/data/` que decide entre el dataset demo y una consulta real a
+  Supabase (`isDemoMode()`).
 
 ## Setup local
 
@@ -156,7 +196,9 @@ mano en lugar de que el server lo consulte directo.
 | `profiles`, `sync_logs`, `audit_logs` | solo-app, no vienen de Sheets |
 
 `0002_views.sql` agrega `v_payment_ledger`, la vista aplanada que alimenta
-`/payments` y el export CSV.
+`/payments` y el export CSV. Ver `docs/database-schema.md` para el
+detalle completo pensado para TechOps, incluida la dependencia de
+Supabase Auth.
 
 RLS está activo en todas las tablas: lectura para cualquier usuario
 autenticado, escritura reservada a rutas server-side con la service role
@@ -175,13 +217,18 @@ una fila real en `payments`.
 
 ## Roadmap / siguiente fase
 
-1. Conectar el proyecto Supabase real, correr las migraciones, y crear el
-   service account de Google (ver "Antes del primer sync real" arriba).
-2. Correr el primer sync real, confirmar `TAB.paymentValidation` y
+1. **Walmart y Sam's** — conectar sus fuentes de datos operativos y
+   extender `src/lib/sync/` + `src/lib/data/` para soportar múltiples
+   marcas en los mismos dashboards.
+2. **Cortes por ciudad y por slot** en Analytics, como desgloses propios
+   (hoy solo viven como dato dentro del detalle de cada orden).
+3. Decidir el destino final de la base de datos/auth (Supabase
+   self-hosted vs. otro proveedor) — ver `docs/database-schema.md`.
+4. Correr el primer sync real, confirmar `TAB.paymentValidation` y
    `TAB.bonosSupply` contra la barra de pestañas, y validar conteo de
    registros Sheets vs Supabase por hoja (sección 42 del brief original —
    conciliación de migración).
-3. Confirmar la fuente de `Master Data BA` (no se encontró en el archivo
+5. Confirmar la fuente de `Master Data BA` (no se encontró en el archivo
    auditado — ver `docs/data-audit.md`).
-4. Tiendas, Zonas, Analytics, Calidad de Datos, Reportes (audit log UI,
-   system health, gestión de roles ya viven en Admin).
+6. Tiendas, Zonas, Calidad de Datos, Reportes (audit log UI, system
+   health, gestión de roles ya viven en Admin).
