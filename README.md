@@ -80,16 +80,6 @@ npm run dev
 
 Sin completar `.env.local`, la app funciona igual en modo demo (ver arriba).
 
-### Conectar Supabase real
-
-1. Crea un proyecto en [supabase.com](https://supabase.com).
-2. Corre las migraciones de `supabase/migrations/` en orden (SQL editor o
-   `supabase db push`).
-3. Copia `Project URL`, `anon public key` y `service_role key` a
-   `.env.local` según `.env.example`.
-4. Crea al menos un usuario en Supabase Auth y una fila en `profiles` con
-   `role = 'ADMIN'` para poder entrar.
-
 ### Variables de entorno
 
 Ver `.env.example`. `SUPABASE_SERVICE_ROLE_KEY` es server-only — nunca se

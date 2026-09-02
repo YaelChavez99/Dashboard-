@@ -1,0 +1,32 @@
+steps:
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '$_SERVICE_NAME'
+      - '--source=.'
+      - '--region=us-central1'
+      - '--project=zb-firebase-projects-poc'
+      - '--service-account=cloud-deploy@zb-firebase-projects-poc.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'
+      # Node.js runtime pin. NOTE: the current Google Cloud Buildpacks env
+      # var is GOOGLE_NODEJS_VERSION, not GOOGLE_RUNTIME_VERSION — verify
+      # with TechOps before first deploy, this sandbox couldn't reach
+      # cloud.google.com docs to double-check live. Next.js 16 requires
+      # Node >=20.9; Node 20 LTS reached end-of-life Apr 2026, so 22.x is
+      # the lowest LTS line still expected in the current builder image.
+      - '--set-build-env-vars=GOOGLE_NODEJS_VERSION=22.x.x'
+      # Public (non-secret) config hardcoded directly; secrets passed as
+      # Cloud Build substitutions (TechOps fills these in on the Trigger,
+      # never hardcoded here). REPLACE_ME values are ones this session
+      # never had — fill in before the first real deploy.
+      - '--set-env-vars=NEXT_PUBLIC_SUPABASE_URL=REPLACE_ME,GOOGLE_SERVICE_ACCOUNT_EMAIL=REPLACE_ME,GOOGLE_SHEETS_SPREADSHEET_ID=1dOfBB8gcZsBR-GTPkYQcOdTbpbXH0MQk0FHuri6uRqY,BIGQUERY_PROJECT_ID=zb-data-bu-mexico-dev,BIGQUERY_DATASET=1_raw_ext_gsheet,NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY},SUPABASE_SERVICE_ROLE_KEY=${_SUPABASE_SERVICE_ROLE_KEY},GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=${_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY}'
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _SERVICE_NAME: 'finance-ops-poc'
+  # List ONLY sensitive secrets here for TechOps to fill in the trigger
+  _SUPABASE_ANON_KEY: ''
+  _SUPABASE_SERVICE_ROLE_KEY: ''
+  _GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ''
