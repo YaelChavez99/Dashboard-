@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { isDemoMode } from "./demo-mode";
-import { ORDERS, type MockOrder } from "./mock-dataset";
+import { type MockOrder } from "./mock-dataset";
+import { getOperationalOrders } from "./operational-live-source";
 
 export type Granularity = "day" | "week" | "month";
 
@@ -141,7 +142,8 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
   const granularity = filters.granularity ?? "day";
 
   if (isDemoMode()) {
-    const rows = applyFilters(ORDERS, filters);
+    const { orders } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters);
 
     const buckets = new Map<string, TrendPoint>();
     for (const o of rows) {
@@ -269,7 +271,8 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
 
 export async function getStorePerformance(filters: AnalyticsFilters): Promise<StorePerformanceItem[]> {
   if (isDemoMode()) {
-    const rows = applyFilters(ORDERS, filters);
+    const { orders } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters);
     const map = new Map<string, StorePerformanceItem & { onTime: number }>();
     for (const o of rows) {
       const existing = map.get(o.store.id) ?? {
@@ -316,7 +319,8 @@ export async function getStorePerformance(filters: AnalyticsFilters): Promise<St
 
 export async function getUserPerformance(filters: AnalyticsFilters): Promise<UserPerformanceItem[]> {
   if (isDemoMode()) {
-    const rows = applyFilters(ORDERS, filters);
+    const { orders } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters);
     const map = new Map<string, UserPerformanceItem & { onTime: number; distanceSum: number }>();
     for (const o of rows) {
       const existing = map.get(o.user.id) ?? {
@@ -369,16 +373,18 @@ export async function getUserPerformance(filters: AnalyticsFilters): Promise<Use
     .sort((a, b) => b.count - a.count);
 }
 
-export function getZoneOptions() {
+export async function getZoneOptions() {
   if (isDemoMode()) {
-    return Array.from(new Set(ORDERS.map((o) => o.store.zone))).sort();
+    const { orders } = await getOperationalOrders();
+    return Array.from(new Set(orders.map((o) => o.store.zone))).sort();
   }
   return [];
 }
 
-export function getStateOptions() {
+export async function getStateOptions() {
   if (isDemoMode()) {
-    return Array.from(new Set(ORDERS.map((o) => o.store.state))).sort();
+    const { orders } = await getOperationalOrders();
+    return Array.from(new Set(orders.map((o) => o.store.state))).sort();
   }
   return [];
 }
@@ -388,13 +394,24 @@ export interface StoreOption {
   name: string;
 }
 
-export function getStoreOptions(): StoreOption[] {
+export async function getStoreOptions(): Promise<StoreOption[]> {
   if (isDemoMode()) {
+    const { orders } = await getOperationalOrders();
     const map = new Map<string, string>();
-    for (const o of ORDERS) map.set(o.store.id, o.store.name);
+    for (const o of orders) map.set(o.store.id, o.store.name);
     return Array.from(map.entries())
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
   return [];
+}
+
+/**
+ * Whether the demo-mode data currently being served is live Google Sheets
+ * data (Option B — no database, see operational-live-source.ts) or purely
+ * synthetic demo data. Only meaningful when isDemoMode() is true.
+ */
+export async function isOperationalDataLive(): Promise<boolean> {
+  const { live } = await getOperationalOrders();
+  return live;
 }

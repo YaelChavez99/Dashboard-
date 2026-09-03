@@ -14,6 +14,7 @@ import {
 import { AnalyticsFilterBar } from "@/components/dashboard/analytics-filter-bar";
 import { OrderVolumeChart } from "@/components/dashboard/order-volume-chart";
 import { BreakdownBars } from "@/components/dashboard/breakdown-bars";
+import { DemoModeBanner } from "@/components/dashboard/demo-mode-banner";
 import {
   getAnalyticsOverview,
   getStorePerformance,
@@ -21,8 +22,10 @@ import {
   getZoneOptions,
   getStateOptions,
   getStoreOptions,
+  isOperationalDataLive,
   type Granularity,
 } from "@/lib/data/analytics";
+import { isDemoMode } from "@/lib/data/demo-mode";
 import { formatPercent } from "@/lib/utils";
 
 export default async function AnalyticsPage({
@@ -47,14 +50,15 @@ export default async function AnalyticsPage({
 
   const filters = { days, granularity, zone, state, storeId, status };
 
-  const [overview, storePerf, userPerf] = await Promise.all([
+  const [overview, storePerf, userPerf, zones, states, stores, liveData] = await Promise.all([
     getAnalyticsOverview(filters),
     getStorePerformance(filters),
     getUserPerformance(filters),
+    getZoneOptions(),
+    getStateOptions(),
+    getStoreOptions(),
+    isOperationalDataLive(),
   ]);
-  const zones = getZoneOptions();
-  const states = getStateOptions();
-  const stores = getStoreOptions();
 
   function withFilter(key: string, value: string) {
     const search = new URLSearchParams();
@@ -87,6 +91,8 @@ export default async function AnalyticsPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {isDemoMode() && <DemoModeBanner live={liveData} />}
+
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Analytics</h1>
         <p className="text-sm text-muted-foreground">
