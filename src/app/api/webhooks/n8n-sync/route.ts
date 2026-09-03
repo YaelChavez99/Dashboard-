@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { isDemoMode } from "@/lib/data/demo-mode";
+import { mapRecordsToOrders, setWebhookOrders } from "@/lib/data/operational-live-source";
 import { parseBigQueryOrders, deriveStoresFromBigQuery, deriveUsersFromBigQuery } from "@/lib/sync/bigquery-parsers";
 import { upsertUsersFromBigQuery, upsertStoresFromBigQuery, upsertZones, upsertOrders } from "@/lib/sync/upsert";
 
@@ -24,24 +25,26 @@ async function logStep(sourceSheet: string, startedAt: string, result: { read: n
 /**
  * Server-to-server webhook for n8n — pushes rows from BigQuery/Google
  * Sheets straight into the app, sidestepping the need for this app to
- * hold its own BigQuery credentials (n8n runs with TechOps' own GCP
- * access instead). Same row shape and parse/upsert pipeline as the
- * manual CSV upload (src/app/api/sync/upload-csv/route.ts) and the
- * BigQuery-direct sync (src/lib/sync/run-operational-sync.ts) — only
- * the transport and auth differ.
+ * hold its own BigQuery/Sheets credentials (n8n runs with the caller's
+ * own Google login instead). Same row shape as the manual CSV upload
+ * (src/app/api/sync/upload-csv/route.ts) and the BigQuery-direct sync
+ * (src/lib/sync/run-operational-sync.ts) — only the transport and auth
+ * differ.
+ *
+ * Two behaviors depending on whether Cloud SQL exists yet:
+ * - DATABASE_URL set: upserts into Postgres/SQL Server via Prisma (the
+ *   original design — persists across instances/restarts).
+ * - No DATABASE_URL (demo mode): stores the parsed rows in the in-memory
+ *   cache from operational-live-source.ts instead of erroring, so
+ *   Analytics can show them without any database at all. Same endpoint,
+ *   same n8n node — nothing changes on n8n's side when Cloud SQL shows up
+ *   later, this branch just stops being used.
  *
  * Auth: shared-secret header, not a user session — n8n can't do an
  * interactive Google Workspace login. Set N8N_WEBHOOK_SECRET (Passbolt)
  * and have n8n send it as `Authorization: Bearer <secret>`.
  */
 export async function POST(request: NextRequest) {
-  if (isDemoMode()) {
-    return NextResponse.json(
-      { error: "No hay una base de datos conectada — configura DATABASE_URL antes de sincronizar." },
-      { status: 400 }
-    );
-  }
-
   const expectedSecret = process.env.N8N_WEBHOOK_SECRET;
   if (!expectedSecret) {
     return NextResponse.json({ error: "N8N_WEBHOOK_SECRET no está configurado en el servidor." }, { status: 500 });
@@ -76,6 +79,16 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 }
     );
+  }
+
+  if (isDemoMode()) {
+    const orders = mapRecordsToOrders(rawRows);
+    setWebhookOrders(orders);
+    return NextResponse.json({
+      mode: "cache-en-memoria (sin base de datos)",
+      rowsRead: rawRows.length,
+      ordersMapped: orders.length,
+    });
   }
 
   try {

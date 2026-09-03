@@ -8,20 +8,36 @@ import {
 import { ORDERS as DEMO_ORDERS, type MockOrder } from "./mock-dataset";
 
 /**
- * "Option B" data path — no Cloud SQL required. Reads the "Data BA" tab of
- * the same Google Sheet audited in docs/data-audit.md directly on each
- * request, so Analytics can show real operational data while Cloud SQL
- * provisioning is still pending on TechOps' side. Once DATABASE_URL is set
- * this path is unused — analytics.ts's live-mode branch (Prisma) takes
- * over instead.
+ * No-Cloud-SQL data paths for Analytics — two ways in, same output shape:
  *
- * Data BA has the exact same column names as `ext_bodega_aurrera`
- * (BigQuery) — see docs/data-audit.md — so the BigQuery parse/derive
- * functions are reused as-is; only the row source differs.
+ * - Direct read (`hasSheetsSource` / `fetchLiveOrders`): the app itself
+ *   reads "Data BA" with a Google service account. Needs
+ *   GOOGLE_SERVICE_ACCOUNT_EMAIL/PRIVATE_KEY, which TechOps hasn't been
+ *   able to provide (no IAM access to create/share one).
+ * - Webhook-fed (`setWebhookOrders` / `getWebhookOrders`): n8n reads the
+ *   sheet with its own Google login and POSTs the rows to
+ *   /api/webhooks/n8n-sync, same as it would for the Cloud-SQL path — but
+ *   when there's no DATABASE_URL, that route stores them here instead of
+ *   erroring. No service account, no database, at the cost of the cache
+ *   living only in the Cloud Run instance that received the POST (fine
+ *   for a low-traffic POC; not a substitute for real persistence).
+ *
+ * Once DATABASE_URL is set, neither path is used — analytics.ts's
+ * live-mode branch (Prisma) takes over.
+ *
+ * Data BA / ext_bodega_aurrera (BigQuery) share the exact same column
+ * names (see docs/data-audit.md), so the BigQuery parse/derive functions
+ * are reused as-is for both paths; only the row source differs.
  */
 
-const CACHE_TTL_MS = 10 * 60 * 1000;
-let cache: { at: number; orders: MockOrder[] } | null = null;
+const SHEETS_CACHE_TTL_MS = 10 * 60 * 1000;
+let sheetsCache: { at: number; orders: MockOrder[] } | null = null;
+
+// Longer-lived: this is only refreshed when n8n's schedule fires (every
+// 30-60 min per docs/n8n-workflow.md), not on every request — stale data
+// past a few hours means the n8n workflow itself stopped running.
+const WEBHOOK_CACHE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+let webhookCache: { at: number; orders: MockOrder[] } | null = null;
 
 export function hasSheetsSource(): boolean {
   return Boolean(
@@ -29,6 +45,10 @@ export function hasSheetsSource(): boolean {
       process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY &&
       process.env.GOOGLE_SHEETS_SPREADSHEET_ID
   );
+}
+
+export function setWebhookOrders(orders: MockOrder[]) {
+  webhookCache = { at: Date.now(), orders };
 }
 
 function rowsToRecords(values: string[][]): Record<string, unknown>[] {
@@ -43,10 +63,11 @@ function rowsToRecords(values: string[][]): Record<string, unknown>[] {
   });
 }
 
-async function fetchLiveOrders(): Promise<MockOrder[]> {
-  const values = await getSheetValues(RANGES.dataBA);
-  const records = rowsToRecords(values);
-
+/**
+ * Shared by both data paths: turns raw Data BA / ext_bodega_aurrera rows
+ * into the MockOrder shape Analytics already consumes.
+ */
+export function mapRecordsToOrders(records: Record<string, unknown>[]): MockOrder[] {
   const parsedOrders = parseBigQueryOrders(records);
   const storeByExtId = new Map(deriveStoresFromBigQuery(records).map((s) => [s.storeExtId, s]));
   const userByEmail = new Map(deriveUsersFromBigQuery(records).map((u) => [u.email, u]));
@@ -91,6 +112,11 @@ async function fetchLiveOrders(): Promise<MockOrder[]> {
     .filter((o) => !Number.isNaN(o.date.getTime()));
 }
 
+async function fetchLiveOrders(): Promise<MockOrder[]> {
+  const values = await getSheetValues(RANGES.dataBA);
+  return mapRecordsToOrders(rowsToRecords(values));
+}
+
 export interface OperationalOrders {
   orders: MockOrder[];
   live: boolean;
@@ -101,12 +127,16 @@ export interface OperationalOrders {
  * demo dataset so a broken credential can't break the page.
  */
 export async function getOperationalOrders(): Promise<OperationalOrders> {
+  if (webhookCache && Date.now() - webhookCache.at < WEBHOOK_CACHE_MAX_AGE_MS) {
+    return { orders: webhookCache.orders, live: true };
+  }
+
   if (!hasSheetsSource()) {
     return { orders: DEMO_ORDERS, live: false };
   }
 
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
-    return { orders: cache.orders, live: true };
+  if (sheetsCache && Date.now() - sheetsCache.at < SHEETS_CACHE_TTL_MS) {
+    return { orders: sheetsCache.orders, live: true };
   }
 
   try {
@@ -114,7 +144,7 @@ export async function getOperationalOrders(): Promise<OperationalOrders> {
     if (orders.length === 0) {
       return { orders: DEMO_ORDERS, live: false };
     }
-    cache = { at: Date.now(), orders };
+    sheetsCache = { at: Date.now(), orders };
     return { orders, live: true };
   } catch (err) {
     console.error("[operational-live-source] Sheets fetch failed, falling back to demo data:", err);

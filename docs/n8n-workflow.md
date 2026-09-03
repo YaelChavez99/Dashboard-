@@ -6,17 +6,27 @@ credenciales), solo Google Sheets con tu propia cuenta.
 
 ## Qué hace y qué NO hace
 
-Este workflow empuja filas de "Data BA" hacia
-`/api/webhooks/n8n-sync`, que las guarda en Cloud SQL (`orders`,
-`stores`, `users`). **Necesita `DATABASE_URL` configurado en el servicio**
-para hacer algo útil — mientras Cloud SQL no exista, el webhook responde
-400 con un mensaje claro, no rompe nada, pero tampoco guarda datos.
+Este workflow empuja filas de "Data BA" hacia `/api/webhooks/n8n-sync`,
+que se comporta distinto según exista o no Cloud SQL:
 
-Esto es un camino **distinto y paralelo** al que ya está en producción
-(Analytics leyendo Google Sheets en vivo, sin base de datos — ver
-`src/lib/data/operational-live-source.ts`). Ese ya funciona hoy sin
-esperar nada de esto. Este workflow es para cuando Cloud SQL exista y
-queramos que los datos queden persistidos ahí también.
+- **Sin `DATABASE_URL`** (nuestro caso hoy): el webhook guarda las filas
+  en un caché en memoria dentro de la app — sin base de datos, sin
+  cuenta de servicio de Google. Analytics las lee de ahí. Es el mismo
+  patrón que la Opción B (`src/lib/data/operational-live-source.ts`),
+  pero alimentado por este webhook en vez de que la app lea el Sheet
+  directamente — así evitamos necesitar la llave de cuenta de servicio
+  que TechOps no puede darnos.
+  ⚠️ Ese caché vive solo en la instancia de Cloud Run que recibió el
+  POST — si el servicio escala a más de una instancia, otra instancia
+  no lo tendría hasta su propio próximo POST. Aceptable para un POC de
+  bajo tráfico; no reemplaza una base de datos real.
+- **Con `DATABASE_URL`**: guarda en Cloud SQL (`orders`, `stores`,
+  `users`) — el diseño original, con persistencia real entre reinicios
+  e instancias.
+
+No hay que cambiar nada en n8n entre un caso y otro — mismo nodo, misma
+URL, mismo secret. El cambio de comportamiento pasa solo del lado de la
+app, según exista o no `DATABASE_URL`.
 
 ## 1. Credencial de Google Sheets en n8n
 
@@ -103,9 +113,7 @@ curl -X POST https://finance-ops-poc-174716734672.us-central1.run.app/api/webhoo
   -d '{"rows":[{"ORDER_ID":"test-1","STATUS":"DELIVERED","STORE_ID":"2983","STORE_NUMBER":"1579","STORE_NAME":"Calle De Los Pinos","STATE":"Estado de México","DELIVERY_DATE":"2026-08-30","SLOT":"10:00 - 11:00","ON_TIME":1,"DISTANCE_MAN_HAV":2.4,"SHOPPER_FULL_NAME":"Prueba Test","SHOPPER_EMAIL":"prueba@zubale.com","NO_LINES_REQUESTED":10,"PEDIDOS_LATE":0,"ZONA_CLASIFICACION":"OCCIDENTE","FECHA_LIMPIA":"2026-08-30"}]}'
 ```
 
-- Si `DATABASE_URL` no está configurado todavía: esperas un 400 con
-  `"No hay una base de datos conectada..."` — es correcto, confirma que
-  el endpoint y el secret funcionan, solo falta Cloud SQL.
+- Si `DATABASE_URL` no está configurado todavía: `{"mode": "cache-en-memoria (sin base de datos)", "rowsRead": 1, "ordersMapped": 1}` — guardó la fila en el caché en memoria; ábrela en Analytics para confirmar que aparece.
 - Si el secret está mal: 401 `"No autorizado."`
 - Una vez que Cloud SQL exista: deberías ver `ordersUpserted: 1` en la
   respuesta, y una fila nueva en `sync_logs`.
