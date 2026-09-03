@@ -10,6 +10,18 @@ steps:
       - '--project=zb-firebase-projects-poc'
       - '--service-account=cloud-deploy@zb-firebase-projects-poc.iam.gserviceaccount.com'
       - '--allow-unauthenticated'
+      # Pinned to exactly one instance. Needed because
+      # src/lib/data/operational-live-source.ts caches n8n-webhook rows
+      # in memory when there's no DATABASE_URL — with Cloud Run's default
+      # autoscaling, a page load can land on a different instance than
+      # the one that received the webhook POST (or a fresh one after
+      # scale-to-zero), showing demo data even though the webhook
+      # succeeded. One always-on instance makes the cache consistent.
+      # Safe to remove once DATABASE_URL exists (real persistence, no
+      # cache to keep consistent) — costs a bit more than scale-to-zero
+      # in the meantime.
+      - '--min-instances=1'
+      - '--max-instances=1'
       # Node.js runtime pin. NOTE: the current Google Cloud Buildpacks env
       # var is GOOGLE_NODEJS_VERSION, not GOOGLE_RUNTIME_VERSION — verify
       # with TechOps before first deploy, this sandbox couldn't reach
