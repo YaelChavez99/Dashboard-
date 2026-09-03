@@ -37,7 +37,17 @@ let sheetsCache: { at: number; orders: MockOrder[] } | null = null;
 // 30-60 min per docs/n8n-workflow.md), not on every request — stale data
 // past a few hours means the n8n workflow itself stopped running.
 const WEBHOOK_CACHE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
-let webhookCache: { at: number; orders: MockOrder[] } | null = null;
+
+// n8n sends one sync run as many sequential POSTs (one per 2000-row
+// batch — 94,953 rows is ~48 calls). Each call only carries its own
+// batch, so we upsert by orderId into a running map instead of replacing
+// the cache outright (which would leave only the last batch behind). A
+// gap of more than a couple minutes since the last POST is treated as
+// the start of a new run, and the map is reset first — otherwise orders
+// that disappeared from the sheet between runs would linger forever.
+const WEBHOOK_NEW_RUN_GAP_MS = 2 * 60 * 1000;
+let webhookOrdersById = new Map<string, MockOrder>();
+let webhookLastWriteAt = 0;
 
 export function hasSheetsSource(): boolean {
   return Boolean(
@@ -48,7 +58,14 @@ export function hasSheetsSource(): boolean {
 }
 
 export function setWebhookOrders(orders: MockOrder[]) {
-  webhookCache = { at: Date.now(), orders };
+  const now = Date.now();
+  if (now - webhookLastWriteAt > WEBHOOK_NEW_RUN_GAP_MS) {
+    webhookOrdersById = new Map();
+  }
+  for (const order of orders) {
+    webhookOrdersById.set(order.orderId, order);
+  }
+  webhookLastWriteAt = now;
 }
 
 function rowsToRecords(values: string[][]): Record<string, unknown>[] {
@@ -127,8 +144,8 @@ export interface OperationalOrders {
  * demo dataset so a broken credential can't break the page.
  */
 export async function getOperationalOrders(): Promise<OperationalOrders> {
-  if (webhookCache && Date.now() - webhookCache.at < WEBHOOK_CACHE_MAX_AGE_MS) {
-    return { orders: webhookCache.orders, live: true };
+  if (webhookOrdersById.size > 0 && Date.now() - webhookLastWriteAt < WEBHOOK_CACHE_MAX_AGE_MS) {
+    return { orders: Array.from(webhookOrdersById.values()), live: true };
   }
 
   if (!hasSheetsSource()) {
