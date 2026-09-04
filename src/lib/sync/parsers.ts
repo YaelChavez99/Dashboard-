@@ -28,6 +28,14 @@ function toBool01(value: unknown): boolean {
   return String(value).trim() === "1";
 }
 
+// ON_TIME is 1 / 0 / blank — blank means "no aplica", not "not on time",
+// and must stay distinguishable from an explicit 0 (see analytics.ts).
+function toBool01OrNull(value: unknown): boolean | null {
+  const v = String(value ?? "").trim();
+  if (v === "") return null;
+  return v === "1";
+}
+
 function toBoolTrueFalse(value: unknown): boolean {
   return String(value).trim().toUpperCase() === "TRUE";
 }
@@ -104,7 +112,7 @@ export interface ParsedOrder {
   storeExtId: string;
   deliveryDate: string | null;
   slot: string;
-  onTime: boolean;
+  onTime: boolean | null;
   distanceKm: number;
   shopperFullName: string;
   shopperEmail: string;
@@ -133,7 +141,7 @@ export function parseDataBA(rows: string[][]): ParsedOrder[] {
       storeExtId: String(r[12] ?? "").trim(),
       deliveryDate: r[5] ? String(r[5]) : null,
       slot: String(r[6] ?? "").trim(),
-      onTime: toBool01(r[7]),
+      onTime: toBool01OrNull(r[7]),
       distanceKm: toNumber(r[8]),
       shopperFullName: String(r[9] ?? "").trim(),
       shopperEmail: String(r[10] ?? "").trim().toLowerCase(),

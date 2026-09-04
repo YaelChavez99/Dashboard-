@@ -7,9 +7,7 @@ import {
   Code2,
   Database,
   FileSpreadsheet,
-  LayoutDashboard,
   LineChart,
-  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,22 +29,10 @@ export const LIBRARY_CATEGORIES: LibraryCategory[] = [
     title: "Dashboards",
     items: [
       {
-        label: "Overview",
-        description: "Panorama general — KPIs financieros y operativos.",
-        href: "/",
-        icon: LayoutDashboard,
-      },
-      {
         label: "Analytics operativo",
-        description: "Volumen de órdenes, performance por tienda, usuario, zona y estado.",
+        description: "Volumen de órdenes, entregas, on-time% y distancia por tienda y estado.",
         href: "/analytics",
         icon: LineChart,
-      },
-      {
-        label: "Revenue y Margen",
-        description: "Finanzas por tienda — revenue, margen y margen %.",
-        href: "/finance",
-        icon: Wallet,
       },
     ],
   },

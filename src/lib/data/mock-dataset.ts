@@ -200,7 +200,7 @@ export interface MockOrder {
   date: Date;
   slot: string;
   status: string;
-  onTime: boolean;
+  onTime: boolean | null;
   isLate: boolean;
   distanceKm: number;
   linesRequested: number;

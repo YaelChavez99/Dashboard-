@@ -18,7 +18,7 @@ import type { TrendPoint } from "@/lib/data/analytics";
 export function OrderVolumeChart({ data }: { data: TrendPoint[] }) {
   const chartData = data.map((d) => ({
     ...d,
-    onTimePct: d.total > 0 ? Math.round((d.onTime / d.total) * 1000) / 10 : 0,
+    onTimePct: d.eligible > 0 ? Math.round((d.onTime / d.eligible) * 1000) / 10 : 0,
   }));
 
   return (

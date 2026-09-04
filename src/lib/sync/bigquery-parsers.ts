@@ -36,7 +36,7 @@ export function parseBigQueryOrders(rows: Record<string, unknown>[]): ParsedOrde
       storeExtId: isBlank(r.STORE_ID) ? "" : String(r.STORE_ID),
       deliveryDate: bqValue(r.DELIVERY_DATE),
       slot: String(r.SLOT ?? ""),
-      onTime: Number(r.ON_TIME) === 1,
+      onTime: isBlank(r.ON_TIME) ? null : Number(r.ON_TIME) === 1,
       distanceKm: Number(r.DISTANCE_MAN_HAV ?? 0),
       shopperFullName: String(r.SHOPPER_FULL_NAME ?? ""),
       shopperEmail: String(r.SHOPPER_EMAIL ?? "").toLowerCase(),
