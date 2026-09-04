@@ -31,7 +31,6 @@ import { ORDERS as DEMO_ORDERS, type MockOrder } from "./mock-dataset";
  */
 
 const SHEETS_CACHE_TTL_MS = 10 * 60 * 1000;
-let sheetsCache: { at: number; orders: MockOrder[] } | null = null;
 
 // Longer-lived: this is only refreshed when n8n's schedule fires (every
 // 30-60 min per docs/n8n-workflow.md), not on every request — stale data
@@ -46,8 +45,27 @@ const WEBHOOK_CACHE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 // the start of a new run, and the map is reset first — otherwise orders
 // that disappeared from the sheet between runs would linger forever.
 const WEBHOOK_NEW_RUN_GAP_MS = 2 * 60 * 1000;
-let webhookOrdersById = new Map<string, MockOrder>();
-let webhookLastWriteAt = 0;
+
+// Next.js compiles route handlers (app/api/.../route.ts) and pages into
+// separate bundles, each with its OWN copy of a plain module-level `let`
+// — so the webhook route's writes were invisible to the page reading them
+// back, even within the same process. Same fix as the Prisma singleton in
+// src/lib/db.ts: park the mutable state on `globalThis` so every bundle
+// resolves to the same object. Confirmed with a local repro (POST to the
+// webhook, then GET /analytics in the same `next start` process) before
+// and after this fix.
+const globalForLiveSource = globalThis as unknown as {
+  __operationalLiveSource?: {
+    sheetsCache: { at: number; orders: MockOrder[] } | null;
+    webhookOrdersById: Map<string, MockOrder>;
+    webhookLastWriteAt: number;
+  };
+};
+const state = (globalForLiveSource.__operationalLiveSource ??= {
+  sheetsCache: null,
+  webhookOrdersById: new Map<string, MockOrder>(),
+  webhookLastWriteAt: 0,
+});
 
 export function hasSheetsSource(): boolean {
   return Boolean(
@@ -59,13 +77,13 @@ export function hasSheetsSource(): boolean {
 
 export function setWebhookOrders(orders: MockOrder[]) {
   const now = Date.now();
-  if (now - webhookLastWriteAt > WEBHOOK_NEW_RUN_GAP_MS) {
-    webhookOrdersById = new Map();
+  if (now - state.webhookLastWriteAt > WEBHOOK_NEW_RUN_GAP_MS) {
+    state.webhookOrdersById = new Map();
   }
   for (const order of orders) {
-    webhookOrdersById.set(order.orderId, order);
+    state.webhookOrdersById.set(order.orderId, order);
   }
-  webhookLastWriteAt = now;
+  state.webhookLastWriteAt = now;
 }
 
 function rowsToRecords(values: string[][]): Record<string, unknown>[] {
@@ -144,16 +162,16 @@ export interface OperationalOrders {
  * demo dataset so a broken credential can't break the page.
  */
 export async function getOperationalOrders(): Promise<OperationalOrders> {
-  if (webhookOrdersById.size > 0 && Date.now() - webhookLastWriteAt < WEBHOOK_CACHE_MAX_AGE_MS) {
-    return { orders: Array.from(webhookOrdersById.values()), live: true };
+  if (state.webhookOrdersById.size > 0 && Date.now() - state.webhookLastWriteAt < WEBHOOK_CACHE_MAX_AGE_MS) {
+    return { orders: Array.from(state.webhookOrdersById.values()), live: true };
   }
 
   if (!hasSheetsSource()) {
     return { orders: DEMO_ORDERS, live: false };
   }
 
-  if (sheetsCache && Date.now() - sheetsCache.at < SHEETS_CACHE_TTL_MS) {
-    return { orders: sheetsCache.orders, live: true };
+  if (state.sheetsCache && Date.now() - state.sheetsCache.at < SHEETS_CACHE_TTL_MS) {
+    return { orders: state.sheetsCache.orders, live: true };
   }
 
   try {
@@ -161,7 +179,7 @@ export async function getOperationalOrders(): Promise<OperationalOrders> {
     if (orders.length === 0) {
       return { orders: DEMO_ORDERS, live: false };
     }
-    sheetsCache = { at: Date.now(), orders };
+    state.sheetsCache = { at: Date.now(), orders };
     return { orders, live: true };
   } catch (err) {
     console.error("[operational-live-source] Sheets fetch failed, falling back to demo data:", err);
