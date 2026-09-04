@@ -100,10 +100,16 @@ function bucketOf(date: Date, granularity: Granularity): { key: string; label: s
   return { key, label };
 }
 
-function applyFilters(rows: MockOrder[], filters: AnalyticsFilters): MockOrder[] {
+// The synthetic demo dataset is seeded relative to a fixed "today"
+// (see mock-dataset.ts) so its date filters must anchor to that same
+// fixed date, not the real clock. Real data (live Sheets/webhook) has no
+// such anchor — filtering "últimos 30 días" must mean the actual last 30
+// days, or a sheet spanning many months (like ours does) would filter
+// almost everything out relative to a stale fixed date.
+function applyFilters(rows: MockOrder[], filters: AnalyticsFilters, live: boolean): MockOrder[] {
   let out = rows;
   const days = filters.days ?? 30;
-  const cutoff = new Date("2026-08-31T00:00:00Z");
+  const cutoff = live ? new Date() : new Date("2026-08-31T00:00:00Z");
   cutoff.setDate(cutoff.getDate() - days);
   out = out.filter((o) => o.date >= cutoff);
 
@@ -142,8 +148,8 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
   const granularity = filters.granularity ?? "day";
 
   if (isDemoMode()) {
-    const { orders } = await getOperationalOrders();
-    const rows = applyFilters(orders, filters);
+    const { orders, live } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters, live);
 
     const buckets = new Map<string, TrendPoint>();
     for (const o of rows) {
@@ -271,8 +277,8 @@ export async function getAnalyticsOverview(filters: AnalyticsFilters): Promise<A
 
 export async function getStorePerformance(filters: AnalyticsFilters): Promise<StorePerformanceItem[]> {
   if (isDemoMode()) {
-    const { orders } = await getOperationalOrders();
-    const rows = applyFilters(orders, filters);
+    const { orders, live } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters, live);
     const map = new Map<string, StorePerformanceItem & { onTime: number }>();
     for (const o of rows) {
       const existing = map.get(o.store.id) ?? {
@@ -319,8 +325,8 @@ export async function getStorePerformance(filters: AnalyticsFilters): Promise<St
 
 export async function getUserPerformance(filters: AnalyticsFilters): Promise<UserPerformanceItem[]> {
   if (isDemoMode()) {
-    const { orders } = await getOperationalOrders();
-    const rows = applyFilters(orders, filters);
+    const { orders, live } = await getOperationalOrders();
+    const rows = applyFilters(orders, filters, live);
     const map = new Map<string, UserPerformanceItem & { onTime: number; distanceSum: number }>();
     for (const o of rows) {
       const existing = map.get(o.user.id) ?? {
